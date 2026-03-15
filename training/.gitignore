@@ -1,0 +1,5 @@
+venv/
+output/
+*.tflite
+__pycache__/
+*.pyc

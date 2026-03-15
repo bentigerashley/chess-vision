@@ -103,12 +103,14 @@ class ChessViewModel(private val appContext: Context) : ViewModel() {
                     return@withContext null
                 }
                 val board = Array(8) { Array(8) { PieceType.EMPTY } }
+                val confGrid = Array(8) { FloatArray(8) }
                 var lowConfidence = false
                 for (row in 0 until 8) {
                     for (col in 0 until 8) {
                         val idx = row * 8 + col
                         val (piece, conf) = classifier.classifySquare(squares[idx])
                         board[row][col] = piece
+                        confGrid[row][col] = conf
                         if (conf < PieceClassifier.MIN_CONFIDENCE) lowConfidence = true
                     }
                 }
@@ -117,14 +119,72 @@ class ChessViewModel(private val appContext: Context) : ViewModel() {
                 val fen = FenGenerator.toFullFen(board)
                 _uiState.value = _uiState.value.copy(
                     isProcessing = false,
+                    screen = AppScreen.VERIFICATION,
                     detectedBoard = board,
+                    confidenceGrid = confGrid.map { it.toTypedArray() }.toTypedArray(),
                     fenString = fen,
-                    errorMessage = if (lowConfidence) "Some pieces had low confidence. Review the board." else null
+                    errorMessage = if (lowConfidence) "Some pieces had low confidence. Tap squares to correct." else null
                 )
                 fen
             }
-            result?.let { fen -> runAnalysis(fen) }
+            // Do not auto-run analysis; user taps "Analyze" on verification screen
         }
+    }
+
+    /** Set piece at (row, col) and recompute FEN. Used for manual correction on verification screen. */
+    fun setPiece(row: Int, col: Int, piece: PieceType) {
+        val board = _uiState.value.detectedBoard ?: return
+        if (row !in 0..7 || col !in 0..7) return
+        val newBoard = Array(8) { r -> Array(8) { c -> board[r][c] } }
+        newBoard[row][col] = piece
+        val fen = FenGenerator.toFullFen(newBoard)
+        _uiState.value = _uiState.value.copy(detectedBoard = newBoard, fenString = fen)
+    }
+
+    /** Rotate board 180° (rank 8 ↔ rank 1, files reversed). Useful when orientation was wrong. */
+    fun rotateBoard() {
+        val board = _uiState.value.detectedBoard ?: return
+        val newBoard = Array(8) { row ->
+            Array(8) { col ->
+                board[7 - row][7 - col]
+            }
+        }
+        val conf = _uiState.value.confidenceGrid
+        val newConf = conf?.let { grid ->
+            Array(8) { row -> Array(8) { col -> grid[7 - row][7 - col] } }
+        }
+        val fen = FenGenerator.toFullFen(newBoard)
+        _uiState.value = _uiState.value.copy(
+            detectedBoard = newBoard,
+            confidenceGrid = newConf,
+            fenString = fen
+        )
+    }
+
+    /** Run Stockfish analysis on current FEN and switch to analysis screen. */
+    fun startAnalysis() {
+        val fen = _uiState.value.fenString ?: return
+        analysisJob?.cancel()
+        analysisJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(screen = AppScreen.ANALYSIS, isAnalyzing = true, analysisResult = null)
+            val result = withContext(Dispatchers.IO) { stockfishEngine.analyze(fen) }
+            _uiState.value = _uiState.value.copy(isAnalyzing = false, analysisResult = result)
+        }
+    }
+
+    /** Return to capture screen; clear detected state so user can retake. */
+    fun backToCapture() {
+        _uiState.value = ChessUiState(screen = AppScreen.CAPTURE)
+    }
+
+    /** Return from analysis to verification to correct position and re-analyze. */
+    fun backToVerification() {
+        _uiState.value = _uiState.value.copy(screen = AppScreen.VERIFICATION)
+    }
+
+    /** Toggle debug overlay (e.g. confidence values, grid). For development. */
+    fun toggleDebugOverlay() {
+        _uiState.value = _uiState.value.copy(showDebugOverlay = !_uiState.value.showDebugOverlay)
     }
 
     private fun runAnalysis(fen: String) {
@@ -149,27 +209,39 @@ class ChessViewModel(private val appContext: Context) : ViewModel() {
     }
 }
 
+/** App has three distinct stages: capture → verification → analysis. */
+enum class AppScreen { CAPTURE, VERIFICATION, ANALYSIS }
+
 /** UI state for MainScreen. */
 data class ChessUiState(
+    val screen: AppScreen = AppScreen.CAPTURE,
     val isCapturing: Boolean = false,
     val isProcessing: Boolean = false,
     val isAnalyzing: Boolean = false,
     val detectedBoard: Array<Array<PieceType>>? = null,
+    /** Per-square confidence from classifier (0f..1f). Only set when board is first detected. */
+    val confidenceGrid: Array<Array<Float>>? = null,
     val fenString: String? = null,
     val analysisResult: AnalysisResult? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val showDebugOverlay: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
         other as ChessUiState
-        if (isCapturing != other.isCapturing || isProcessing != other.isProcessing ||
+        if (screen != other.screen || isCapturing != other.isCapturing || isProcessing != other.isProcessing ||
             isAnalyzing != other.isAnalyzing || fenString != other.fenString ||
-            errorMessage != other.errorMessage || analysisResult != other.analysisResult) return false
+            errorMessage != other.errorMessage || analysisResult != other.analysisResult ||
+            showDebugOverlay != other.showDebugOverlay) return false
         if (detectedBoard != null) {
             if (other.detectedBoard == null) return false
             for (r in 0..7) for (c in 0..7) if (detectedBoard[r][c] != other.detectedBoard!![r][c]) return false
         } else if (other.detectedBoard != null) return false
+        if (confidenceGrid != null) {
+            if (other.confidenceGrid == null) return false
+            for (r in 0..7) for (c in 0..7) if (confidenceGrid[r][c] != other.confidenceGrid!![r][c]) return false
+        } else if (other.confidenceGrid != null) return false
         return true
     }
     override fun hashCode(): Int = javaClass.hashCode()
