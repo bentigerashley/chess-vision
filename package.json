@@ -14,16 +14,13 @@
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
     "chess.js": "^1.4.0",
-    "jszip": "^3.10.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "stockfish": "^18.0.8",
-    "three": "^0.185.1"
+    "stockfish": "^18.0.8"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@types/three": "^0.185.0",
     "@vitejs/plugin-react": "^5.1.0",
     "typescript": "^5.9.0",
     "vite": "^8.1.0",

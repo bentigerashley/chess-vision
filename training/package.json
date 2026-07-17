@@ -1,0 +1,20 @@
+{
+  "name": "chess-vision-training",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Private, offline data-source tooling for Chess Vision.",
+  "type": "module",
+  "scripts": {
+    "test": "py -3 -m unittest discover -s tests -p \"test_*.py\"",
+    "select-puzzles": "py -3 source/fetch_lichess_puzzles.py --config config/dataset.v1.json --output output/puzzle-sources.json",
+    "test:renderer": "node --test tests/renderer-contract.node-test.mjs",
+    "test:validate": "node --test tests/validate-dataset.node-test.mjs",
+    "render": "node renderer/run-render.mjs"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^24.10.2",
+    "three": "^0.180.0"
+  }
+}
