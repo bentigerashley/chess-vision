@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { PNG } from 'pngjs';
-import { CLASS_VOCABULARY, DatasetValidationError, validateDatasetDirectory, validateSourceManifest } from '../validate-dataset.mjs';
+import { CLASS_VOCABULARY, DatasetValidationError, validateDatasetDirectory, validateLabel, validateSourceManifest } from '../validate-dataset.mjs';
 
 const SOURCE_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const FEN = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
@@ -110,6 +110,27 @@ test('accepts an exact 64-square, full-board label with source/model/config prov
     const result = await validateDatasetDirectory({ sourceManifestPath: run.sourcePath, renderManifestPath: run.renderPath, outputRoot: run.output, trainingOutputRoot: path.join(run.root, 'training-output'), requireFullRun: false });
     assert.deepEqual({ valid: result.valid, source_positions: result.source_positions, artifacts: result.artifacts }, { valid: true, source_positions: 1, artifacts: 1 });
   } finally { await rm(run.root, { recursive: true, force: true }); }
+});
+
+test('requires visual-family provenance for the realistic procedural renderer', () => {
+  const label = makeLabel();
+  label.style.model_version = 'procedural-piece-families/v2';
+  label.camera.camera_rig = 'player-oblique';
+  label.lighting = { id: 'neutral-studio', key_intensity: 2.4 };
+
+  assert.throws(() => validateLabel(label), (error) => error instanceof DatasetValidationError && error.message.includes('label.style.board_family'));
+});
+
+test('binds a v2 label to the declared chess-set family', () => {
+  const label = makeLabel();
+  label.style = {
+    family: 'wood-staunton', model_version: 'procedural-piece-families/v2', seed: 11,
+    board_family: 'carrara-serpentine', silhouette: 'club-staunton',
+  };
+  label.camera.camera_rig = 'player-oblique';
+  label.lighting = { id: 'neutral-studio', key_intensity: 2.4 };
+
+  assert.throws(() => validateLabel(label), (error) => error instanceof DatasetValidationError && error.message.includes('must match wood-staunton'));
 });
 
 test('rejects a square label that contradicts the FEN', async () => {

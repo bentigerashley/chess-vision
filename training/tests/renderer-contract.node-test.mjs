@@ -5,6 +5,8 @@ import * as THREE from '../node_modules/three/build/three.module.js';
 import { allSquareLabels, configureCamera, fenToSquares, physicalSquare, validateBoardInFrame } from '../scene/board-scene.mjs';
 import { assertLabelMatchesFen, boxesFromMask, idToRgb, rgbToId } from '../scene/labels.mjs';
 import { createJobs } from '../renderer/run-render.mjs';
+import { CHESS_SET_SPECS } from '../scene/piece-factories.mjs';
+import { createRandom } from '../scene/random.mjs';
 
 const FEN = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/2N5/PPPP1PPP/R1BQKBNR b KQkq - 2 3';
 
@@ -45,6 +47,25 @@ test('synthetic images put White rank 1 at the bottom like rectified app capture
   const rankEight = new THREE.Vector3(...physicalSquare(0, 8).center).project(camera);
   assert(camera.position.z < 0);
   assert(rankOne.y < rankEight.y, 'rank 1 must project nearer the bottom of the rendered image');
+});
+
+test('every set family owns a distinct real-world board and piece specification', () => {
+  const specs = Object.values(CHESS_SET_SPECS);
+  assert.equal(specs.length, 5);
+  assert.equal(new Set(specs.map(({ board }) => board.id)).size, 5);
+  assert.equal(new Set(specs.map(({ silhouette }) => silhouette)).size, 5);
+  for (const spec of specs) {
+    assert.match(spec.board.light_square, /^#/);
+    assert.match(spec.board.dark_square, /^#/);
+    assert.match(spec.board.frame, /^#/);
+  }
+});
+
+test('camera sampling spans multiple safe photographic rigs', () => {
+  const cameras = Array.from({ length: 12 }, (_, seed) => configureCamera(createRandom(seed + 1), 1024, 1024));
+  assert(cameras.every(({ camera, metadata }) => validateBoardInFrame(camera, 1024, 1024, metadata.board_margin_px)));
+  assert(new Set(cameras.map(({ metadata }) => metadata.camera_rig)).size >= 3);
+  assert(new Set(cameras.map(({ metadata }) => metadata.fov_degrees)).size >= 3);
 });
 
 test('renderer jobs use the post-first-move source FEN and all five styles deterministically', () => {

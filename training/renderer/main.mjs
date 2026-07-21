@@ -3,6 +3,8 @@ import { buildChessScene, projectBoardCorners, validateBoardInFrame } from '../s
 import { boxesFromMask, buildLabel, idToRgb } from '../scene/labels.mjs';
 
 const canvas = document.querySelector('#dataset-canvas');
+let sharedRenderer;
+let sharedRendererSize;
 
 function dataUrlToBase64(dataUrl) {
   const separator = dataUrl.indexOf(',');
@@ -39,6 +41,21 @@ function createRenderer(width, height) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   return renderer;
 }
+
+function rendererFor(width, height) {
+  if (!sharedRenderer) {
+    sharedRenderer = createRenderer(width, height);
+    sharedRendererSize = { width, height };
+  } else if (sharedRendererSize.width !== width || sharedRendererSize.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    sharedRenderer.setSize(width, height, false);
+    sharedRendererSize = { width, height };
+  }
+  return sharedRenderer;
+}
+
+window.addEventListener('unload', () => sharedRenderer?.dispose(), { once: true });
 
 function toMaskPng(pixels, width, height) {
   const maskCanvas = document.createElement('canvas');
@@ -136,11 +153,12 @@ function disposeSceneResources(scene) {
 /** Called from Puppeteer only; it never becomes part of the PWA bundle. */
 export async function renderDatasetJob(job) {
   validateJob(job);
-  const renderer = createRenderer(job.width, job.height);
+  const renderer = rendererFor(job.width, job.height);
   let sceneData;
   try {
     const identity = browserIdentity(renderer);
     sceneData = buildChessScene(job);
+    renderer.toneMappingExposure = sceneData.renderSettings.tone_mapping_exposure;
     if (!validateBoardInFrame(sceneData.camera, job.width, job.height, sceneData.cameraMetadata.board_margin_px)) {
       throw new Error('Frame rejected: the full physical outer board frame is not inside the safe output margin');
     }
@@ -159,7 +177,13 @@ export async function renderDatasetJob(job) {
       fen: job.fen,
       artifact: { id: job.artifactId, rgb_path: job.rgbPath, instance_mask_path: job.maskPath },
       source: job.source,
-      style: { family: job.style, seed: job.seed, model_version: 'procedural-piece-families/v1' },
+      style: {
+        family: job.style,
+        seed: job.seed,
+        model_version: 'procedural-piece-families/v2',
+        board_family: sceneData.environment.board_id,
+        silhouette: sceneData.environment.silhouette,
+      },
       seed: job.seed,
       width: job.width,
       height: job.height,
@@ -172,8 +196,6 @@ export async function renderDatasetJob(job) {
     return { rgbBase64, maskBase64: mask.pngBase64, label, renderer: identity };
   } finally {
     if (sceneData) disposeSceneResources(sceneData.scene);
-    // Each job owns a renderer; dispose its resources before returning to Puppeteer.
-    renderer.dispose();
   }
 }
 

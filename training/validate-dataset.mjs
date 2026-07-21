@@ -15,6 +15,14 @@ const TRAINING_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)))
 const DEFAULT_TRAINING_OUTPUT_ROOT = path.join(TRAINING_ROOT, 'output');
 const FILES = 'abcdefgh';
 const FEN_PIECES = new Set(['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']);
+// Kept as plain metadata so archival validation does not depend on Three.js or a DOM.
+const V2_SET_PROVENANCE = Object.freeze({
+  'wood-staunton': { board_family: 'walnut-maple', silhouette: 'club-staunton' },
+  'marble-classical': { board_family: 'carrara-serpentine', silhouette: 'neoclassical-column' },
+  'ebony-ivory-tournament': { board_family: 'ebony-ivory-inlay', silhouette: 'slender-tournament' },
+  'brass-minimal': { board_family: 'brushed-brass-slate', silhouette: 'architectural-minimal' },
+  'ornate-dark-wood': { board_family: 'mahogany-boxwood', silhouette: 'baroque-ornate' },
+});
 
 /** The classifier contract: index 0 is intentionally the empty-square class. */
 export const CLASS_VOCABULARY = Object.freeze([
@@ -189,6 +197,9 @@ function validateCamera(label, errors) {
   const width = label.image?.width;
   const height = label.image?.height;
   const margin = requireFiniteNumber(camera.board_margin_px, 'label.camera.board_margin_px', errors);
+  if (label.style?.model_version === 'procedural-piece-families/v2') {
+    requireString(camera.camera_rig, 'label.camera.camera_rig', errors);
+  }
   requireFiniteNumber(camera.fov_degrees, 'label.camera.fov_degrees', errors);
   validateVector(camera.position, 'label.camera.position', errors);
   validateVector(camera.target, 'label.camera.target', errors);
@@ -286,10 +297,19 @@ export function validateLabel(label) {
   if (!isPlainObject(style)) addError(errors, 'label.style', 'is required');
   else {
     requireString(style.family, 'label.style.family', errors);
-    requireString(style.model_version, 'label.style.model_version', errors);
+    const modelVersion = requireString(style.model_version, 'label.style.model_version', errors);
     requireInteger(style.seed, 'label.style.seed', errors, { min: 0 });
+    if (modelVersion === 'procedural-piece-families/v2') {
+      const expected = V2_SET_PROVENANCE[style.family];
+      if (!expected) addError(errors, 'label.style.family', 'must be a known procedural-piece-families/v2 set');
+      const boardFamily = requireString(style.board_family, 'label.style.board_family', errors);
+      const silhouette = requireString(style.silhouette, 'label.style.silhouette', errors);
+      if (expected && boardFamily !== null && boardFamily !== expected.board_family) addError(errors, 'label.style.board_family', `must match ${style.family} (${expected.board_family})`);
+      if (expected && silhouette !== null && silhouette !== expected.silhouette) addError(errors, 'label.style.silhouette', `must match ${style.family} (${expected.silhouette})`);
+    }
   }
   if (!isPlainObject(label.lighting)) addError(errors, 'label.lighting', 'is required');
+  else if (style?.model_version === 'procedural-piece-families/v2') requireString(label.lighting.id, 'label.lighting.id', errors);
   if (!isPlainObject(label.renderer) || label.renderer.webgl2 !== true) addError(errors, 'label.renderer.webgl2', 'must record an accepted WebGL2 renderer');
   validateCamera(label, errors);
 
@@ -388,8 +408,8 @@ async function assertPathInsideRoot(outputRoot, trainingOutputRoot, relativePath
     return null;
   }
   try {
-    const [rootReal, trainingReal, candidateReal] = await Promise.all([realpath(outputRoot), realpath(trainingOutputRoot), realpath(candidate)]);
-    const relativeToTraining = path.relative(trainingReal, candidateReal);
+    const candidateReal = await realpath(candidate);
+    const relativeToTraining = path.relative(trainingOutputRoot, candidateReal);
     if (relativeToTraining.startsWith('..') || path.isAbsolute(relativeToTraining)) addError(errors, field, 'resolves outside training/output');
     const metadata = await stat(candidateReal);
     if (!metadata.isFile()) addError(errors, field, 'must refer to a file');
@@ -516,6 +536,7 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
   const artifactIds = new Set();
   const artifactPaths = new Set();
   const sourceCounts = new Map();
+  const v2StylesBySource = new Map();
   const expectedFiles = new Set([path.resolve(outputReal, 'manifest.json')]);
   for (const [index, artifact] of artifacts.entries()) {
     const field = `render.artifacts[${index}]`;
@@ -553,16 +574,22 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
       if (label.fen !== sourcePosition.rendered_fen || label.source.source_fen !== sourcePosition.source_fen || label.source.first_uci !== sourcePosition.first_uci) addError(errors, `${field}.label.source`, 'does not match the source position truth');
       if (label.source.source_version !== source.source_version) addError(errors, `${field}.label.source.source_version`, 'does not match the source manifest version');
       sourceCounts.set(label.source.puzzle_id, (sourceCounts.get(label.source.puzzle_id) ?? 0) + 1);
+      if (label.style.model_version === 'procedural-piece-families/v2') {
+        const styles = v2StylesBySource.get(label.source.puzzle_id) ?? new Set();
+        if (styles.has(label.style.family)) addError(errors, field, `duplicates ${label.style.family} for source ${label.source.puzzle_id}`);
+        styles.add(label.style.family);
+        v2StylesBySource.set(label.source.puzzle_id, styles);
+      }
     }
   }
   for (const sourceId of knownSources.keys()) if (sourceCounts.get(sourceId) !== variants) addError(errors, 'render.artifacts', `must contain exactly ${variants} artifacts for source ${sourceId}`);
+  if (fullRun) for (const [sourceId, styles] of v2StylesBySource.entries()) {
+    if (styles.size !== Object.keys(V2_SET_PROVENANCE).length) addError(errors, 'render.artifacts', `must contain every v2 set family exactly once for source ${sourceId}`);
+  }
   if (fullRun && (knownSources.size !== 50 || artifacts.length !== 250)) addError(errors, 'render', 'full configured run must contain 50 sources × 5 styles = 250 artifacts');
 
   const actualFiles = await allFiles(outputReal);
   for (const actualFile of actualFiles) if (!expectedFiles.has(actualFile)) addError(errors, 'output', `contains an unreferenced extra file: ${path.relative(outputReal, actualFile)}`);
-  for (const expectedFile of expectedFiles) {
-    try { await stat(expectedFile); } catch { addError(errors, 'output', `is missing expected file: ${path.relative(outputReal, expectedFile)}`); }
-  }
   if (errors.length) throw new DatasetValidationError(errors);
   return { valid: true, source_positions: source.positions.length, artifacts: artifacts.length, output: outputReal };
 }
