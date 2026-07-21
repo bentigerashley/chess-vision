@@ -1,6 +1,7 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
-import { buildChessScene, projectBoardCorners, validateBoardInFrame } from '../scene/board-scene.mjs';
+import { buildChessScene, projectBoardCorners, projectPieceBounds, validateSceneInFrame } from '../scene/board-scene.mjs';
 import { boxesFromMask, buildLabel, idToRgb } from '../scene/labels.mjs';
+import { inspectLockedGltfAssetProfile } from '../scene/gltf-piece-factory.mjs';
 
 const canvas = document.querySelector('#dataset-canvas');
 let sharedRenderer;
@@ -160,12 +161,16 @@ export async function renderDatasetJob(job) {
     const identity = browserIdentity(renderer);
     sceneData = await buildChessScene(job);
     renderer.toneMappingExposure = sceneData.renderSettings.tone_mapping_exposure;
-    if (!validateBoardInFrame(sceneData.camera, job.width, job.height, sceneData.cameraMetadata.board_margin_px)) {
-      throw new Error('Frame rejected: the full physical outer board frame is not inside the safe output margin');
+    if (!validateSceneInFrame(sceneData.camera, job.width, job.height, sceneData.cameraMetadata.board_margin_px, sceneData.pieces.map(({ root }) => root))) {
+      throw new Error('Frame rejected: the full physical board and every complete piece must be inside the safe output margin');
     }
     renderer.render(sceneData.scene, sceneData.camera);
     const rgbBase64 = dataUrlToBase64(canvas.toDataURL('image/png'));
     const projectedBoardCorners = projectBoardCorners(sceneData.camera, job.width, job.height);
+    const projectedPieceBounds = sceneData.pieces.map(({ instanceId, root }) => {
+      const { corners, ...bounds } = projectPieceBounds(sceneData.camera, root, job.width, job.height);
+      return { instance_id: instanceId, ...bounds };
+    });
     const mask = renderInstanceMask({ renderer, ...sceneData, width: job.width, height: job.height });
     const maskBoxes = boxesFromMask({
       pixels: mask.pixels,
@@ -181,7 +186,7 @@ export async function renderDatasetJob(job) {
       style: {
         family: job.style,
         seed: job.seed,
-        model_version: 'gltf-asset-packs/v3',
+        model_version: 'gltf-asset-packs/v4',
         board_family: sceneData.environment.board_id,
         silhouette: sceneData.environment.silhouette,
         source_kind: sceneData.environment.source_kind,
@@ -197,7 +202,12 @@ export async function renderDatasetJob(job) {
       height: job.height,
       squares: sceneData.squares,
       pieces,
-      camera: { ...sceneData.cameraMetadata, frame_accepted: true, projected_board_corners: projectedBoardCorners },
+      camera: {
+        ...sceneData.cameraMetadata,
+        frame_accepted: true,
+        projected_board_corners: projectedBoardCorners,
+        projected_piece_bounds: projectedPieceBounds,
+      },
       lighting: sceneData.lighting,
       renderer: identity,
     });
@@ -214,3 +224,4 @@ export async function renderDatasetJob(job) {
 }
 
 window.renderChessDatasetJob = renderDatasetJob;
+window.inspectChessAssetProfile = inspectLockedGltfAssetProfile;

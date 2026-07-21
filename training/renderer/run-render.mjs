@@ -25,7 +25,7 @@ function required(value, name) {
 
 export function parseArguments(argumentsList) {
   const manifest = required(option(argumentsList, '--manifest', 'output/puzzle-sources.json'), '--manifest');
-  const output = required(option(argumentsList, '--output', 'output/dataset-v5'), '--output');
+  const output = required(option(argumentsList, '--output', 'output/dataset-v6'), '--output');
   const variants = Number(option(argumentsList, '--variants', '5'));
   const width = Number(option(argumentsList, '--width', '1024'));
   const height = Number(option(argumentsList, '--height', '1024'));
@@ -154,7 +154,7 @@ export async function renderManifest(options) {
   const runIdentity = {
     source_manifest: sourceManifestName,
     source_sha256: createHash('sha256').update(sourceManifestBytes).digest('hex'),
-    renderer_model_version: 'gltf-asset-packs/v3',
+    renderer_model_version: 'gltf-asset-packs/v4',
     asset_id: cachedAsset.asset.id,
     asset_sha256: cachedAsset.asset.sha256,
     variants_per_position: options.variants,
@@ -195,7 +195,7 @@ export async function renderManifest(options) {
     await writeFile(path.join(options.output, 'manifest.json'), `${JSON.stringify({
       schema_version: 'chess-vision.render-manifest/v1',
       source_manifest: sourceManifestName,
-      renderer_model_version: 'gltf-asset-packs/v3',
+      renderer_model_version: 'gltf-asset-packs/v4',
       run_identity: runIdentity,
       expected_positions: sourceManifest.selection?.accepted_count ?? sourceManifest.positions.length,
       variants_per_position: options.variants,

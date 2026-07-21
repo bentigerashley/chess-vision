@@ -10,6 +10,8 @@
     "test:renderer": "node --test tests/renderer-contract.node-test.mjs",
     "test:validate": "node --test tests/validate-dataset.node-test.mjs",
     "test:assets": "node --test tests/asset-lock.node-test.mjs",
+    "test:asset-profile": "node renderer/asset-profile-preflight.mjs",
+    "test:quality": "node --test tests/render-quality.node-test.mjs",
     "fetch-assets": "node assets/fetch-assets.mjs",
     "render": "node renderer/run-render.mjs"
   },

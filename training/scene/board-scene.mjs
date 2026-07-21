@@ -8,6 +8,7 @@ export const BOARD_SQUARE_SIZE = 1;
 export const BOARD_HALF_SIZE = 4;
 export const BOARD_FRAME_HALF_SIZE = BOARD_HALF_SIZE + 0.58;
 export const BOARD_TOP_Y = 0.22;
+export const BOARD_FRAME_BOTTOM_Y = -0.2;
 export const REQUIRED_BOARD_MARGIN_PX = 32;
 
 const FEN_PIECES = new Set(['p', 'r', 'n', 'b', 'q', 'k', 'P', 'R', 'N', 'B', 'Q', 'K']);
@@ -139,7 +140,7 @@ function createBoard(random, spec) {
   return group;
 }
 
-export function configureCamera(random, width, height) {
+export function configureCamera(random, width, height, pieceRoots = []) {
   const rig = CAMERA_RIGS[Math.floor(random() * CAMERA_RIGS.length)];
   const camera = new THREE.PerspectiveCamera(between(random, rig.fov[0], rig.fov[1]), width / height, 0.1, 100);
   const direction = new THREE.Vector3(between(random, rig.x[0], rig.x[1]), between(random, rig.y[0], rig.y[1]), between(random, rig.z[0], rig.z[1])).normalize();
@@ -148,29 +149,78 @@ export function configureCamera(random, width, height) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     camera.position.copy(target).addScaledVector(direction, distance);
     camera.lookAt(target);
-    if (validateBoardInFrame(camera, width, height, REQUIRED_BOARD_MARGIN_PX)) break;
+    if (validateSceneInFrame(camera, width, height, REQUIRED_BOARD_MARGIN_PX, pieceRoots)) break;
     distance += 1.55;
   }
-  if (!validateBoardInFrame(camera, width, height, REQUIRED_BOARD_MARGIN_PX)) throw new Error('Frame rejected: physical outer board frame would be cropped');
+  if (!validateSceneInFrame(camera, width, height, REQUIRED_BOARD_MARGIN_PX, pieceRoots)) throw new Error('Frame rejected: the physical board or a complete piece would be cropped');
   return { camera, metadata: { camera_rig: rig.id, fov_degrees: camera.fov, position: camera.position.toArray(), target: target.toArray(), board_margin_px: REQUIRED_BOARD_MARGIN_PX } };
 }
 
-export function projectBoardCorners(camera, width, height) {
+export function projectWorldPoints(camera, points, width, height) {
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
-  return [
-    new THREE.Vector3(-BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, -BOARD_FRAME_HALF_SIZE),
-    new THREE.Vector3(BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, -BOARD_FRAME_HALF_SIZE),
-    new THREE.Vector3(BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, BOARD_FRAME_HALF_SIZE),
-    new THREE.Vector3(-BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, BOARD_FRAME_HALF_SIZE),
-  ].map((corner) => {
-    const projected = corner.project(camera);
+  return points.map((point) => {
+    const projected = point.clone().project(camera);
     return { x: (projected.x + 1) * width / 2, y: (1 - projected.y) * height / 2, z: projected.z };
   });
 }
 
+function boxCorners(bounds) {
+  return [bounds.min.x, bounds.max.x].flatMap((x) => [bounds.min.y, bounds.max.y].flatMap((y) => [bounds.min.z, bounds.max.z].map((z) => new THREE.Vector3(x, y, z))));
+}
+
+function boardBoundsCorners() {
+  return boxCorners(new THREE.Box3(
+    new THREE.Vector3(-BOARD_FRAME_HALF_SIZE, BOARD_FRAME_BOTTOM_Y, -BOARD_FRAME_HALF_SIZE),
+    new THREE.Vector3(BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, BOARD_FRAME_HALF_SIZE),
+  ));
+}
+
+export function projectBoardCorners(camera, width, height) {
+  return projectWorldPoints(camera, [
+    new THREE.Vector3(-BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, -BOARD_FRAME_HALF_SIZE),
+    new THREE.Vector3(BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, -BOARD_FRAME_HALF_SIZE),
+    new THREE.Vector3(BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, BOARD_FRAME_HALF_SIZE),
+    new THREE.Vector3(-BOARD_FRAME_HALF_SIZE, BOARD_TOP_Y, BOARD_FRAME_HALF_SIZE),
+  ], width, height);
+}
+
+export function validateProjectedPointsInFrame(points, width, height, margin = REQUIRED_BOARD_MARGIN_PX) {
+  return points.every(({ x, y, z }) => Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z) && z >= -1 && z <= 1 && x >= margin && x <= width - margin && y >= margin && y <= height - margin);
+}
+
+function exactWorldBounds(root) {
+  root.updateMatrixWorld(true);
+  const transformKey = root.matrixWorld.elements.join(',');
+  const cached = root.userData.exact_world_bounds;
+  if (cached?.transform_key === transformKey) return cached.bounds;
+  // The source GLB has detailed/morph-capable meshes. The fast cached box can
+  // be a few pixels tighter than the real raster silhouette, so compute the
+  // exact world-space vertex envelope used by the truth contract once per
+  // final root transform.
+  const bounds = new THREE.Box3().setFromObject(root, true);
+  root.userData.exact_world_bounds = { transform_key: transformKey, bounds };
+  return bounds;
+}
+
+export function projectPieceBounds(camera, root, width, height) {
+  const bounds = exactWorldBounds(root);
+  if (bounds.isEmpty()) throw new Error('Piece bounds are empty');
+  const corners = projectWorldPoints(camera, boxCorners(bounds), width, height);
+  return {
+    min_x: Math.min(...corners.map(({ x }) => x)), min_y: Math.min(...corners.map(({ y }) => y)),
+    max_x: Math.max(...corners.map(({ x }) => x)), max_y: Math.max(...corners.map(({ y }) => y)),
+    corners,
+  };
+}
+
 export function validateBoardInFrame(camera, width, height, margin = REQUIRED_BOARD_MARGIN_PX) {
-  return projectBoardCorners(camera, width, height).every(({ x, y, z }) => Number.isFinite(x) && Number.isFinite(y) && z >= -1 && z <= 1 && x >= margin && x <= width - margin && y >= margin && y <= height - margin);
+  return validateProjectedPointsInFrame(projectWorldPoints(camera, boardBoundsCorners(), width, height), width, height, margin);
+}
+
+export function validateSceneInFrame(camera, width, height, margin = REQUIRED_BOARD_MARGIN_PX, pieceRoots = []) {
+  return validateBoardInFrame(camera, width, height, margin)
+    && pieceRoots.every((root) => validateProjectedPointsInFrame(projectPieceBounds(camera, root, width, height).corners, width, height, margin));
 }
 
 function chooseLightingRig(random, board) {
@@ -180,7 +230,10 @@ function chooseLightingRig(random, board) {
 
 function createLighting(scene, random, board) {
   const rig = chooseLightingRig(random, board);
-  const hemisphere = new THREE.HemisphereLight(rig.sky, rig.ground, between(random, 0.7, 1.05));
+  // A tournament board photographed indoors still receives broad room and
+  // window bounce. This keeps ebony and oxidised-metal detail visible without
+  // resorting to emissive materials or a studio-flat look.
+  const hemisphere = new THREE.HemisphereLight(rig.sky, rig.ground, between(random, 1.28, 1.65));
   scene.add(hemisphere);
   const key = new THREE.DirectionalLight(rig.key, between(random, 2.4, 3.6));
   key.position.set(between(random, -7, 7), between(random, 9, 14), between(random, -1, 8));
@@ -191,7 +244,7 @@ function createLighting(scene, random, board) {
   key.shadow.bias = -0.00016;
   key.shadow.normalBias = 0.025;
   scene.add(key);
-  const fill = new THREE.DirectionalLight(rig.fill, between(random, 0.45, 0.9));
+  const fill = new THREE.DirectionalLight(rig.fill, between(random, 0.9, 1.28));
   fill.position.set(between(random, -10, -4), between(random, 5, 9), between(random, -9, -3));
   scene.add(fill);
   const rim = new THREE.SpotLight(rig.rim, between(random, 0.7, 1.35), 18, Math.PI / 5.2, 0.55, 1.2);
@@ -233,7 +286,7 @@ export async function buildChessScene({ fen, style, seed, width, height }) {
     pieces.push({ instanceId, root, piece: entry.piece, square: entry.square });
     instanceId += 1;
   }
-  const { camera, metadata: cameraMetadata } = configureCamera(random, width, height);
+  const { camera, metadata: cameraMetadata } = configureCamera(random, width, height, pieces.map(({ root }) => root));
   return {
     scene, camera, pieces, squares: allSquareLabels(fen), cameraMetadata, lighting,
     environment: {
