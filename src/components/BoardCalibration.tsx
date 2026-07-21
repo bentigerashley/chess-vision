@@ -1,196 +1,186 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type PointerEvent } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
+  Image,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native'
+import {
+  asBoardCorners,
   calibrationError,
-  rectifyBoardImage,
-  type BoardCorners,
-  type BoardOrientation,
-  type ImageSize,
-  type Point,
-} from '../lib/boardGeometry'
-import type { CalibratedCapture } from '../services/recognition'
-import './BoardCalibration.css'
+  canonicalCornerOrder,
+  clampUnit,
+  containBounds,
+  defaultCorners,
+  displayToNormalised,
+  normalisedToDisplay,
+} from '../lib/calibration'
+import { colors, shared } from '../theme'
+import type { BoardOrientation, CalibratedCapture, NativePhoto, Point } from '../types/capture'
 
 type BoardCalibrationProps = {
-  file: File
+  photo: NativePhoto
   onCalibrated: (capture: CalibratedCapture) => void
   onCancel: () => void
 }
 
 const cornerNames = ['Top left', 'Top right', 'Bottom right', 'Bottom left'] as const
+const nudgeAmount = 0.025
 
-const clamp = (value: number, maximum: number) => Math.max(0, Math.min(maximum, value))
-
-const isPoint = (point: Point | undefined): point is Point => Boolean(point)
-
-const asBoardCorners = (corners: (Point | undefined)[]): BoardCorners | undefined => {
-  if (corners.length !== 4 || !corners.every(isPoint)) return undefined
-  return [corners[0], corners[1], corners[2], corners[3]]
-}
-
-export function BoardCalibration({ file, onCalibrated, onCancel }: BoardCalibrationProps) {
-  const imageRef = useRef<HTMLImageElement>(null)
-  const [sourceSize, setSourceSize] = useState<ImageSize>()
-  const [corners, setCorners] = useState<(Point | undefined)[]>([])
-  const [outerEdgesConfirmed, setOuterEdgesConfirmed] = useState(false)
+export function BoardCalibration({ photo, onCalibrated, onCancel }: BoardCalibrationProps) {
+  const previewRef = useRef<View>(null)
+  const previewOrigin = useRef({ x: 0, y: 0 })
+  const [preview, setPreview] = useState({ width: 0, height: 0 })
+  const [corners, setCorners] = useState<(Point | undefined)[]>(() => [...defaultCorners])
   const [orientation, setOrientation] = useState<BoardOrientation>('white-at-bottom')
-  const [dragging, setDragging] = useState<number | null>(null)
-  const [isRectifying, setIsRectifying] = useState(false)
-  const [renderError, setRenderError] = useState<string>()
-  const photoUrl = useMemo(() => URL.createObjectURL(file), [file])
+  const [outerEdgesConfirmed, setOuterEdgesConfirmed] = useState(false)
 
-  useEffect(() => () => URL.revokeObjectURL(photoUrl), [photoUrl])
-
+  const sourceSize = { width: photo.width, height: photo.height }
+  const bounds = containBounds(preview, sourceSize)
   const boardCorners = asBoardCorners(corners)
-  const geometryError = sourceSize && boardCorners
-    ? calibrationError(boardCorners, sourceSize, outerEdgesConfirmed)
-    : undefined
-  const canConfirm = Boolean(boardCorners && sourceSize && !geometryError && !isRectifying)
+  const error = calibrationError(boardCorners, outerEdgesConfirmed)
+  const canContinue = Boolean(boardCorners && !error)
 
-  const suggestedPoint = (index: number): Point => {
-    const width = sourceSize?.width ?? 0
-    const height = sourceSize?.height ?? 0
-    return [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height }][index]
-  }
-
-  const updateCorner = (index: number, point: Point) => {
-    if (!sourceSize) return
+  const setCorner = (index: number, point: Point) => {
     setCorners(current => {
       const next = [...current]
-      next[index] = { x: clamp(point.x, sourceSize.width), y: clamp(point.y, sourceSize.height) }
+      next[index] = point
       return next
     })
     setOuterEdgesConfirmed(false)
-    setRenderError(undefined)
   }
 
-  const imagePoint = (event: PointerEvent<HTMLElement>): Point | undefined => {
-    const image = imageRef.current
-    if (!image || !sourceSize) return undefined
-    const bounds = image.getBoundingClientRect()
-    return {
-      x: clamp((event.clientX - bounds.left) * sourceSize.width / bounds.width, sourceSize.width),
-      y: clamp((event.clientY - bounds.top) * sourceSize.height / bounds.height, sourceSize.height),
-    }
+  const setCornerFromPreview = (index: number, point: Point) => {
+    setCorner(index, displayToNormalised(point, bounds))
   }
 
-  const placeCorner = (event: PointerEvent<HTMLDivElement>) => {
-    if (dragging !== null) return
-    const firstMissing = corners.findIndex(point => !point)
-    const nextIndex = firstMissing === -1 && corners.length < 4 ? corners.length : firstMissing
-    if (nextIndex === -1) return
-    const point = imagePoint(event)
-    if (point) updateCorner(nextIndex, point)
+  const firstUnplacedCorner = () => corners.findIndex(corner => !corner)
+
+  const placeCorner = (event: { nativeEvent: { locationX: number; locationY: number } }) => {
+    const index = firstUnplacedCorner()
+    if (index === -1) return
+    setCornerFromPreview(index, { x: event.nativeEvent.locationX, y: event.nativeEvent.locationY })
   }
 
-  const startDrag = (index: number, event: PointerEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    setDragging(index)
-  }
+  const updateFromPagePoint = (index: number, pageX: number, pageY: number) =>
+    setCornerFromPreview(index, { x: pageX - previewOrigin.current.x, y: pageY - previewOrigin.current.y })
 
-  const dragCorner = (index: number, event: PointerEvent<HTMLButtonElement>) => {
-    if (dragging !== index) return
-    const point = imagePoint(event)
-    if (point) updateCorner(index, point)
-  }
-
-  const nudgeCorner = (index: number, event: KeyboardEvent<HTMLButtonElement>) => {
-    const delta = event.shiftKey ? 10 : 2
-    const change = event.key === 'ArrowLeft' ? { x: -delta, y: 0 }
-      : event.key === 'ArrowRight' ? { x: delta, y: 0 }
-        : event.key === 'ArrowUp' ? { x: 0, y: -delta }
-          : event.key === 'ArrowDown' ? { x: 0, y: delta }
-            : undefined
-    if (!change) return
-    event.preventDefault()
-    const point = corners[index] ?? suggestedPoint(index)
-    updateCorner(index, { x: point.x + change.x, y: point.y + change.y })
-  }
-
-  const updateCoordinate = (index: number, coordinate: keyof Point, event: ChangeEvent<HTMLInputElement>) => {
-    const value = Number(event.target.value)
-    if (!Number.isFinite(value)) return
-    const point = corners[index] ?? suggestedPoint(index)
-    updateCorner(index, { ...point, [coordinate]: value })
-  }
-
-  const confirmCalibration = async () => {
-    if (!boardCorners || !sourceSize || !imageRef.current || geometryError) return
-    setIsRectifying(true)
-    setRenderError(undefined)
-    try {
-      const rectifiedImage = await rectifyBoardImage(imageRef.current, sourceSize, boardCorners, orientation)
-      onCalibrated({
-        kind: 'calibrated-capture',
-        source: file,
-        sourceSize,
-        corners: boardCorners,
-        orientation,
-        rectifiedImage,
-        rectifiedSize: { width: 512, height: 512 },
-        outerEdgesConfirmed: true,
+  const responders = useMemo(() => cornerNames.map((_, index) => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: event => {
+      previewRef.current?.measureInWindow((left, top) => {
+        previewOrigin.current = { x: left, y: top }
+        updateFromPagePoint(index, event.nativeEvent.pageX, event.nativeEvent.pageY)
       })
-    } catch (error) {
-      setRenderError(error instanceof Error ? error.message : 'The board could not be rectified. Retake the photo and try again.')
-    } finally {
-      setIsRectifying(false)
-    }
+    },
+    onPanResponderMove: (_event, gesture) => updateFromPagePoint(index, gesture.moveX, gesture.moveY),
+  })), [bounds.height, bounds.width])
+
+  const nudge = (index: number, x: number, y: number) => {
+    const current = corners[index] ?? { x: 0.5, y: 0.5 }
+    setCorner(index, { x: clampUnit(current.x + x), y: clampUnit(current.y + y) })
   }
 
-  return <section className="calibration" aria-labelledby="calibration-title">
-    <p className="eyebrow">CALIBRATE THE FULL BOARD</p>
-    <h2 id="calibration-title">Mark the four outside corners</h2>
-    <p id="calibration-instructions">Tap the corners in order: top left, top right, bottom right, then bottom left. Drag a marker to refine it; focused markers support arrow keys (Shift + arrow for larger moves).</p>
-    <div
-      className="calibration-photo"
-      onPointerDown={placeCorner}
-      aria-describedby="calibration-instructions"
-    >
-      <img
-        ref={imageRef}
-        src={photoUrl}
-        alt="Imported chessboard photo. Mark its four outside corners."
-        onLoad={event => setSourceSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-        onError={() => setRenderError('This photo could not be read. Choose a supported image file.')}
-      />
-      {sourceSize && boardCorners && <svg className="calibration-outline" viewBox={`0 0 ${sourceSize.width} ${sourceSize.height}`} aria-hidden="true"><polygon points={boardCorners.map(point => `${point.x},${point.y}`).join(' ')} /></svg>}
-      {sourceSize && corners.map((point, index) => point && <button
-        key={cornerNames[index]}
-        type="button"
-        className={`calibration-handle ${dragging === index ? 'dragging' : ''}`}
-        style={{ left: `${point.x / sourceSize.width * 100}%`, top: `${point.y / sourceSize.height * 100}%` }}
-        aria-label={`${cornerNames[index]} board corner at ${Math.round(point.x)}, ${Math.round(point.y)}. Use arrow keys to adjust.`}
-        onPointerDown={event => startDrag(index, event)}
-        onPointerMove={event => dragCorner(index, event)}
-        onPointerUp={() => setDragging(null)}
-        onPointerCancel={() => setDragging(null)}
-        onKeyDown={event => nudgeCorner(index, event)}
-      ><span>{index + 1}</span></button>)}
-    </div>
+  const onPreviewLayout = (event: LayoutChangeEvent) => {
+    setPreview(event.nativeEvent.layout)
+    previewRef.current?.measureInWindow((x, y) => { previewOrigin.current = { x, y } })
+  }
 
-    <p className="calibration-state" aria-live="polite">
-      {!sourceSize ? 'Loading photo...' : !boardCorners ? `${corners.filter(isPoint).length} of 4 corners marked.` : geometryError ?? 'Board outline is valid. Confirm that the complete board is visible.'}
-    </p>
+  const nudgeDirections = [
+    { label: 'left', glyph: '←', x: -nudgeAmount, y: 0 },
+    { label: 'up', glyph: '↑', x: 0, y: -nudgeAmount },
+    { label: 'down', glyph: '↓', x: 0, y: nudgeAmount },
+    { label: 'right', glyph: '→', x: nudgeAmount, y: 0 },
+  ] as const
 
-    <fieldset className="calibration-fields">
-      <legend>Corner coordinates (keyboard alternative)</legend>
-      {cornerNames.map((name, index) => <label key={name}>{name}
-        <span><input aria-label={`${name} X coordinate`} type="number" min="0" max={sourceSize?.width} value={corners[index]?.x ?? ''} onChange={event => updateCoordinate(index, 'x', event)} /> x</span>
-        <span><input aria-label={`${name} Y coordinate`} type="number" min="0" max={sourceSize?.height} value={corners[index]?.y ?? ''} onChange={event => updateCoordinate(index, 'y', event)} /> y</span>
-      </label>)}
-    </fieldset>
+  return <View style={[shared.card, styles.card]}>
+    <Text style={shared.eyebrow}>CALIBRATE THE FULL BOARD</Text>
+    <Text style={styles.title}>Mark the four outside corners</Text>
+    <Text style={styles.help}>Tap the corners in order: top left, top right, bottom right, then bottom left. Drag a marker to refine it.</Text>
 
-    <fieldset className="calibration-orientation">
-      <legend>Which side has White&apos;s pieces?</legend>
-      <label><input type="radio" name="orientation" checked={orientation === 'white-at-bottom'} onChange={() => setOrientation('white-at-bottom')} /> At the bottom of this photo</label>
-      <label><input type="radio" name="orientation" checked={orientation === 'white-at-top'} onChange={() => setOrientation('white-at-top')} /> At the top of this photo</label>
-      <label><input type="radio" name="orientation" checked={orientation === 'white-at-left'} onChange={() => setOrientation('white-at-left')} /> On the left of this photo</label>
-      <label><input type="radio" name="orientation" checked={orientation === 'white-at-right'} onChange={() => setOrientation('white-at-right')} /> On the right of this photo</label>
-      <small>The rectified model image is always rotated to White at the bottom.</small>
-    </fieldset>
+    <View ref={previewRef} style={[styles.preview, { aspectRatio: photo.width / photo.height }]} onLayout={onPreviewLayout}>
+      <Image accessibilityLabel="Selected chessboard photo" source={{ uri: photo.uri }} resizeMode="contain" style={StyleSheet.absoluteFill} />
+      <Pressable accessibilityRole="button" accessibilityLabel="Photo. Tap to mark the next board corner." style={StyleSheet.absoluteFill} onPress={placeCorner} />
+      {corners.map((corner, index) => {
+        if (!corner || !bounds.width || !bounds.height) return null
+        const display = normalisedToDisplay(corner, bounds)
+        return <View
+          key={cornerNames[index]}
+          style={[styles.handle, { left: display.x - 18, top: display.y - 18 }]}
+          {...responders[index].panHandlers}
+        ><Text style={styles.handleText}>{index + 1}</Text></View>
+      })}
+    </View>
 
-    <label className="outer-edge-confirmation"><input type="checkbox" checked={outerEdgesConfirmed} onChange={event => setOuterEdgesConfirmed(event.target.checked)} /> I can see all four physical outside corners and the complete board edges. This is not a cropped board.</label>
-    {renderError && <p className="calibration-error" role="alert">{renderError}</p>}
-    <div className="calibration-actions"><button type="button" className="quiet" onClick={onCancel}>Choose another photo</button><button type="button" onClick={confirmCalibration} disabled={!canConfirm}>{isRectifying ? 'Rectifying board...' : 'Use this full board'}</button></div>
-  </section>
+    <Text accessibilityLiveRegion="polite" style={[styles.status, error && styles.error]}>
+      {!boardCorners ? `${corners.filter(Boolean).length} of 4 corners marked.` : error ?? 'Board outline is valid. Confirm that the whole board is visible.'}
+    </Text>
+
+    <View style={styles.controls}>
+      <Text style={styles.controlLabel}>Fine adjustments</Text>
+      {cornerNames.map((name, index) => <View key={name} style={styles.nudgeRow}>
+        <Text style={styles.cornerName}>{index + 1}. {name}</Text>
+        <View style={styles.nudges}>
+          {nudgeDirections.map(direction => <Pressable key={direction.label} accessibilityRole="button" accessibilityLabel={`Move ${name} ${direction.label}`} style={styles.nudge} onPress={() => nudge(index, direction.x, direction.y)}><Text style={styles.nudgeText}>{direction.glyph}</Text></Pressable>)}
+        </View>
+      </View>)}
+    </View>
+
+    <View style={styles.controls}>
+      <Text style={styles.controlLabel}>Which side has White's pieces?</Text>
+      <View style={styles.orientationRow}>
+        <Pressable accessibilityRole="radio" accessibilityState={{ selected: orientation === 'white-at-bottom' }} style={[styles.orientation, orientation === 'white-at-bottom' && styles.orientationSelected]} onPress={() => setOrientation('white-at-bottom')}><Text style={styles.orientationText}>Closest to me</Text></Pressable>
+        <Pressable accessibilityRole="radio" accessibilityState={{ selected: orientation === 'white-at-top' }} style={[styles.orientation, orientation === 'white-at-top' && styles.orientationSelected]} onPress={() => setOrientation('white-at-top')}><Text style={styles.orientationText}>Across from me</Text></Pressable>
+      </View>
+      <Text style={styles.caption}>The editor keeps canonical labels with White at the bottom. This choice is saved for a future recognition model.</Text>
+    </View>
+
+    <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: outerEdgesConfirmed }} style={styles.confirmation} onPress={() => setOuterEdgesConfirmed(value => !value)}>
+      <View style={[styles.checkbox, outerEdgesConfirmed && styles.checkboxChecked]}>{outerEdgesConfirmed && <Text style={styles.check}>✓</Text>}</View>
+      <Text style={styles.confirmationText}>I can see all four physical outside corners and complete board edges. This is not a cropped board.</Text>
+    </Pressable>
+
+    <View style={styles.actions}>
+      <Pressable accessibilityRole="button" style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>Choose another photo</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityState={{ disabled: !canContinue }} disabled={!canContinue} style={[styles.primary, !canContinue && styles.disabled]} onPress={() => boardCorners && onCalibrated({ kind: 'calibrated-capture', photo, corners: canonicalCornerOrder(boardCorners, orientation), orientation, outerEdgesConfirmed: true })}><Text style={styles.primaryText}>Continue to correction</Text></Pressable>
+    </View>
+  </View>
 }
+
+const styles = StyleSheet.create({
+  card: { gap: 12 },
+  title: { color: colors.ink, fontSize: 23, fontWeight: '800' },
+  help: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  preview: { backgroundColor: '#191816', borderColor: colors.border, borderWidth: 1, overflow: 'hidden', width: '100%' },
+  handle: { alignItems: 'center', backgroundColor: colors.green, borderColor: colors.canvas, borderRadius: 18, borderWidth: 3, height: 36, justifyContent: 'center', position: 'absolute', width: 36 },
+  handleText: { color: colors.canvas, fontSize: 15, fontWeight: '900' },
+  status: { color: colors.ink, fontSize: 14, fontWeight: '700' },
+  error: { color: colors.warning },
+  controls: { backgroundColor: colors.surfaceRaised, borderRadius: 10, gap: 8, padding: 12 },
+  controlLabel: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  nudgeRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  cornerName: { color: colors.muted, flex: 1, fontSize: 13 },
+  nudges: { flexDirection: 'row', gap: 6 },
+  nudge: { alignItems: 'center', borderColor: colors.border, borderRadius: 6, borderWidth: 1, height: 34, justifyContent: 'center', width: 34 },
+  nudgeText: { color: colors.ink, fontSize: 16, fontWeight: '900' },
+  orientationRow: { flexDirection: 'row', gap: 8 },
+  orientation: { borderColor: colors.border, borderRadius: 8, borderWidth: 1, flex: 1, minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 },
+  orientationSelected: { backgroundColor: '#415b2d', borderColor: colors.green, borderWidth: 2 },
+  orientationText: { color: colors.ink, fontSize: 13, fontWeight: '800', textAlign: 'center' },
+  caption: { color: colors.muted, fontSize: 12, lineHeight: 17 },
+  confirmation: { flexDirection: 'row', gap: 10, paddingVertical: 4 },
+  checkbox: { alignItems: 'center', borderColor: colors.muted, borderRadius: 4, borderWidth: 1, height: 22, justifyContent: 'center', marginTop: 1, width: 22 },
+  checkboxChecked: { backgroundColor: colors.green, borderColor: colors.green },
+  check: { color: colors.canvas, fontSize: 16, fontWeight: '900' },
+  confirmationText: { color: colors.ink, flex: 1, fontSize: 13, lineHeight: 18 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  primary: { alignItems: 'center', backgroundColor: colors.green, borderRadius: 8, minHeight: 46, justifyContent: 'center', paddingHorizontal: 16 },
+  primaryText: { color: colors.canvas, fontSize: 14, fontWeight: '900' },
+  secondary: { alignItems: 'center', borderColor: colors.border, borderRadius: 8, borderWidth: 1, minHeight: 46, justifyContent: 'center', paddingHorizontal: 16 },
+  secondaryText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  disabled: { opacity: 0.45 },
+})

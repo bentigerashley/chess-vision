@@ -7,3 +7,4 @@ generated-datasets/
 training/output/
 training/assets/cache/
 __pycache__/
+.expo/

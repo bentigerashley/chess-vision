@@ -4,27 +4,30 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-engine.mjs",
-    "prebuild": "node scripts/copy-engine.mjs",
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b --pretty false",
-    "test": "vitest run"
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild",
+    "export:android": "expo export --platform android",
+    "export:ios": "expo export --platform ios",
+    "typecheck": "tsc --noEmit",
+    "test": "jest --runInBand"
   },
   "dependencies": {
-    "@tensorflow/tfjs": "^4.22.0",
+    "@udaychauhan/react-native-stockfish": "0.5.2",
     "chess.js": "^1.4.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "stockfish": "^18.0.8"
+    "expo": "~57.0.2",
+    "expo-dev-client": "~57.0.2",
+    "expo-image-picker": "~57.0.2",
+    "react": "19.2.3",
+    "react-native": "0.86.0"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "29.5.14",
     "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^5.1.0",
-    "typescript": "^5.9.0",
-    "vite": "^8.1.0",
-    "vite-plugin-pwa": "^1.1.0",
-    "vitest": "^4.0.0"
+    "jest-expo": "~57.0.0",
+    "react-test-renderer": "^19.2.3",
+    "typescript": "~6.0.3"
   }
 }
