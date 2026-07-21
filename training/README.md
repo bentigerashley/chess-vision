@@ -17,6 +17,18 @@ npm run select-puzzles
 npm run render
 ```
 
+## GPU square-classifier baseline
+
+The model-training path is intentionally separate from the renderer and PWA dependencies. It requires the CUDA-only, pinned stack in `training/requirements-ml.txt`; do not substitute a CPU wheel because the trainer rejects CPU fallback.
+
+```powershell
+py -m pip install -r training/requirements-ml.txt
+python -m training.ml.train --dataset training/output/dataset-v6-final --output training/output/models/chess-piece-v1
+python -m training.ml.verify_export --experiment training/output/models/chess-piece-v1
+```
+
+The trainer first runs the full renderer validator, then source-splits the Lichess puzzle identities before making 64 square crops per board. It exports an ignored ONNX experiment with a machine-readable class/preprocessing contract and a CPU ONNX Runtime parity report. Synthetic metrics remain pipeline evidence only: collect and evaluate a held-out real-photo dataset, then make a separate browser-runtime and output-adapter decision before any model is copied into the PWA.
+
 The selector streams the official Lichess CC0 puzzle export and stops when it has selected the configured number of unique, valid puzzle records. It never writes the large `.csv.zst` export to disk.
 
 Lichess rows describe the board before the opponent's first UCI move in `Moves`. The manifest's `rendered_fen` always applies that first move and is the only FEN downstream renderers may use.
