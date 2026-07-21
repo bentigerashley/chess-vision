@@ -1,0 +1,10 @@
+# GPU-only private training stack. The CUDA wheels support Windows/Python 3.9.
+--index-url https://pypi.org/simple
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0+cu128
+torchvision==0.23.0+cu128
+numpy==2.0.2
+Pillow==11.3.0
+opencv-python-headless==4.13.0.92
+onnx==1.19.1
+onnxruntime==1.19.2
