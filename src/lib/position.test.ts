@@ -1,12 +1,21 @@
-import { describe, expect, it } from 'vitest'
-import { emptyBoard, seededPosition, toFen, validatePosition, validBoard } from './position'
+import { emptyBoard, toFen, validatePosition, validBoard } from './position'
 
 describe('position helpers', () => {
   it('serialises an empty board to FEN', () => expect(toFen(emptyBoard(), 'w')).toBe('8/8/8/8/8/8/8/8 w - - 0 1'))
-  it('requires exactly one king of each colour', () => expect(validBoard(seededPosition(1))).toBe(true))
+  it('requires exactly one king of each colour', () => {
+    const board = emptyBoard()
+    board.e1 = 'K'
+    board.e8 = 'k'
+    expect(validBoard(board)).toBe(true)
+  })
 
   it('serialises explicit position history fields', () => {
-    expect(toFen(seededPosition(1), 'w', 'KQ', '-')).toContain(' w KQ - 0 1')
+    const board = emptyBoard()
+    board.e1 = 'K'
+    board.e8 = 'k'
+    board.a1 = 'R'
+    board.h1 = 'R'
+    expect(toFen(board, 'w', 'KQ', '-')).toContain(' w KQ - 0 1')
   })
 
   it('rejects positions where the non-active king is in check', () => {

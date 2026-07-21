@@ -1,14 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { isCalibratedCapture } from './recognition'
+import { isCalibratedCapture, recogniseBoard } from './recognition'
 
 const capture = {
   kind: 'calibrated-capture',
-  source: {} as File,
-  sourceSize: { width: 1000, height: 800 },
-  corners: [{ x: 10, y: 10 }, { x: 990, y: 10 }, { x: 990, y: 790 }, { x: 10, y: 790 }],
+  photo: { uri: 'file:///board.jpg', width: 1000, height: 800 },
+  corners: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }],
   orientation: 'white-at-bottom',
-  rectifiedImage: {} as Blob,
-  rectifiedSize: { width: 512, height: 512 },
   outerEdgesConfirmed: true,
 } as const
 
@@ -18,5 +14,14 @@ describe('recognition capture contract', () => {
     expect(isCalibratedCapture({ ...capture, outerEdgesConfirmed: false })).toBe(false)
     expect(isCalibratedCapture({ ...capture, kind: 'raw-photo' })).toBe(false)
     expect(isCalibratedCapture({ ...capture, corners: {} })).toBe(false)
+  })
+
+  it('keeps the synthetic-only model behind a truthful editable fallback', async () => {
+    await expect(recogniseBoard(capture)).resolves.toMatchObject({
+      kind: 'unavailable',
+      board: expect.objectContaining({ a1: null, e8: null }),
+      message: expect.stringMatching(/not installed/i),
+    })
+    await expect(recogniseBoard({ ...capture, outerEdgesConfirmed: false })).resolves.toMatchObject({ kind: 'error' })
   })
 })

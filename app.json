@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Chess Vision",
+    "slug": "chess-vision",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "chessvision",
+    "ios": {
+      "bundleIdentifier": "com.bentigerashley.chessvision",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.bentigerashley.chessvision",
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": false,
+          "cameraPermission": "Chess Vision uses your camera to photograph a complete chessboard.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-dev-client"
+    ]
+  }
+}
