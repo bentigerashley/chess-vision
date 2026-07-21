@@ -1,0 +1,15 @@
+{
+  "schema_version": "chess-vision.asset-lock/v1",
+  "assets": [
+    {
+      "id": "a-beautiful-game-v1",
+      "filename": "a-beautiful-game.glb",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/ABeautifulGame/glTF-Binary/ABeautifulGame.glb",
+      "sha256": "bd7133b4b322aae97c589b8839dae8155ad2546acb35ae32a127e722a959d007",
+      "license": "CC-BY-4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "revision": "glTF-Sample-Assets/main; checksum-pinned",
+      "attribution": "© 2020 ASWF, MaterialX Project (original model); © 2022 Ed Mackey (glTF conversion)"
+    }
+  ]
+}

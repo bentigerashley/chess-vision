@@ -1,6 +1,7 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 import { between, createRandom } from './random.mjs';
-import { createPieceFactory, CHESS_SET_FAMILIES, getChessSetSpec } from './piece-factories.mjs';
+import { CHESS_SET_FAMILIES, getChessSetSpec } from './piece-factories.mjs';
+import { createGltfPieceFactory } from './gltf-piece-factory.mjs';
 import { canvasTexture, hexToRgb, seededUnit, TEXTURE_SIZE } from './material-textures.mjs';
 
 export const BOARD_SQUARE_SIZE = 1;
@@ -13,10 +14,10 @@ const FEN_PIECES = new Set(['p', 'r', 'n', 'b', 'q', 'k', 'P', 'R', 'N', 'B', 'Q
 const FILES = 'abcdefgh';
 
 export const CAMERA_RIGS = Object.freeze([
-  { id: 'player-oblique', fov: [37, 46], x: [-0.78, 0.68], y: [0.56, 0.84], z: [-1.04, -0.62], distance: [16.8, 19.5] },
-  { id: 'diagonal-gallery', fov: [34, 42], x: [-1.02, 0.96], y: [0.78, 1.14], z: [-0.88, -0.45], distance: [17.5, 20.8] },
-  { id: 'elevated-overlook', fov: [42, 52], x: [-0.55, 0.55], y: [1.14, 1.55], z: [-0.82, -0.45], distance: [18.4, 22.3] },
-  { id: 'low-player-side', fov: [35, 43], x: [-0.6, 0.62], y: [0.4, 0.6], z: [-1.1, -0.72], distance: [17.4, 20.4] },
+  { id: 'player-oblique', fov: [37, 46], x: [-0.78, 0.68], y: [0.56, 0.84], z: [-1.04, -0.62], distance: [14.4, 17] },
+  { id: 'diagonal-gallery', fov: [34, 42], x: [-1.02, 0.96], y: [0.78, 1.14], z: [-0.88, -0.45], distance: [15.2, 18] },
+  { id: 'elevated-overlook', fov: [42, 52], x: [-0.55, 0.55], y: [1.14, 1.55], z: [-0.82, -0.45], distance: [16, 19] },
+  { id: 'low-player-side', fov: [35, 43], x: [-0.6, 0.62], y: [0.4, 0.6], z: [-1.1, -0.72], distance: [15, 18] },
 ]);
 
 const LIGHTING_RIGS = Object.freeze([
@@ -206,7 +207,12 @@ function createLighting(scene, random, board) {
   };
 }
 
-export function buildChessScene({ fen, style, seed, width, height }) {
+/**
+ * Assemble one private training scene from the approved, asset-backed source.
+ * There is intentionally no procedural selection in this path: a dataset
+ * either uses the locked GLB or fails before an ambiguous truth is emitted.
+ */
+export async function buildChessScene({ fen, style, seed, width, height }) {
   if (!CHESS_SET_FAMILIES.includes(style)) throw new Error(`Unsupported style: ${style}`);
   const random = createRandom(seed);
   const spec = getChessSetSpec(style);
@@ -214,7 +220,7 @@ export function buildChessScene({ fen, style, seed, width, height }) {
   scene.background = new THREE.Color(spec.board.table);
   scene.add(createBoard(random, spec));
   const lighting = createLighting(scene, random, spec.board);
-  const factory = createPieceFactory(style);
+  const factory = await createGltfPieceFactory(style);
   const pieces = [];
   let instanceId = 1;
   for (const entry of fenToSquares(fen)) {
@@ -230,7 +236,11 @@ export function buildChessScene({ fen, style, seed, width, height }) {
   const { camera, metadata: cameraMetadata } = configureCamera(random, width, height);
   return {
     scene, camera, pieces, squares: allSquareLabels(fen), cameraMetadata, lighting,
-    environment: { board_id: spec.board.id, silhouette: spec.silhouette },
+    environment: {
+      board_id: spec.board.id,
+      silhouette: spec.silhouette,
+      ...factory.provenance,
+    },
     renderSettings: { tone_mapping_exposure: lighting.tone_mapping_exposure },
   };
 }

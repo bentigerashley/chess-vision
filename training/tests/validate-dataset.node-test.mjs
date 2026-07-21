@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -131,6 +131,36 @@ test('binds a v2 label to the declared chess-set family', () => {
   label.lighting = { id: 'neutral-studio', key_intensity: 2.4 };
 
   assert.throws(() => validateLabel(label), (error) => error instanceof DatasetValidationError && error.message.includes('must match wood-staunton'));
+});
+
+test('binds v3 labels to the approved mesh asset rather than a silent fallback', () => {
+  const label = makeLabel();
+  label.style = {
+    family: 'wood-staunton', model_version: 'gltf-asset-packs/v3', seed: 11,
+    board_family: 'walnut-maple', silhouette: 'club-staunton',
+    source_kind: 'gltf-asset', asset_id: 'a-beautiful-game-v1',
+    asset_sha256: 'bd7133b4b322aae97c589b8839dae8155ad2546acb35ae32a127e722a959d007',
+    asset_license: 'CC-BY-4.0', asset_revision: 'glTF-Sample-Assets/main; checksum-pinned',
+    asset_attribution: '© 2020 ASWF, MaterialX Project (original model); © 2022 Ed Mackey (glTF conversion)',
+    fallback: false,
+  };
+  label.camera.camera_rig = 'player-oblique';
+  label.lighting = { id: 'neutral-studio', key_intensity: 2.4 };
+  assert.doesNotThrow(() => validateLabel(label));
+
+  label.style.fallback = true;
+  assert.throws(() => validateLabel(label), (error) => error instanceof DatasetValidationError && error.message.includes('label.style.fallback'));
+});
+
+test('a manifest that identifies its renderer version rejects mixed model labels', async () => {
+  const label = makeLabel();
+  const run = await writeValidRun({ label });
+  try {
+    const manifest = JSON.parse(await readFile(run.renderPath, 'utf8'));
+    manifest.renderer_model_version = 'gltf-asset-packs/v3';
+    await writeFile(run.renderPath, JSON.stringify(manifest));
+    await assert.rejects(() => validateDatasetDirectory({ sourceManifestPath: run.sourcePath, renderManifestPath: run.renderPath, outputRoot: run.output, trainingOutputRoot: path.join(run.root, 'training-output'), requireFullRun: false }), (error) => error instanceof DatasetValidationError && error.message.includes('must match render.renderer_model_version'));
+  } finally { await rm(run.root, { recursive: true, force: true }); }
 });
 
 test('rejects a square label that contradicts the FEN', async () => {

@@ -138,6 +138,7 @@ function disposeSceneResources(scene) {
   const textures = new Set();
   scene.traverse((object) => {
     if (!object.isMesh) return;
+    if (object.userData.assetShared) return;
     geometries.add(object.geometry);
     for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
       if (!material) continue;
@@ -157,7 +158,7 @@ export async function renderDatasetJob(job) {
   let sceneData;
   try {
     const identity = browserIdentity(renderer);
-    sceneData = buildChessScene(job);
+    sceneData = await buildChessScene(job);
     renderer.toneMappingExposure = sceneData.renderSettings.tone_mapping_exposure;
     if (!validateBoardInFrame(sceneData.camera, job.width, job.height, sceneData.cameraMetadata.board_margin_px)) {
       throw new Error('Frame rejected: the full physical outer board frame is not inside the safe output margin');
@@ -180,9 +181,16 @@ export async function renderDatasetJob(job) {
       style: {
         family: job.style,
         seed: job.seed,
-        model_version: 'procedural-piece-families/v2',
+        model_version: 'gltf-asset-packs/v3',
         board_family: sceneData.environment.board_id,
         silhouette: sceneData.environment.silhouette,
+        source_kind: sceneData.environment.source_kind,
+        asset_id: sceneData.environment.asset_id,
+        asset_sha256: sceneData.environment.asset_sha256,
+        asset_license: sceneData.environment.asset_license,
+        asset_revision: sceneData.environment.asset_revision,
+        asset_attribution: sceneData.environment.asset_attribution,
+        fallback: sceneData.environment.fallback,
       },
       seed: job.seed,
       width: job.width,
@@ -195,7 +203,13 @@ export async function renderDatasetJob(job) {
     });
     return { rgbBase64, maskBase64: mask.pngBase64, label, renderer: identity };
   } finally {
-    if (sceneData) disposeSceneResources(sceneData.scene);
+    if (sceneData) {
+      disposeSceneResources(sceneData.scene);
+      // WebGLRenderer keeps per-scene render lists. Clearing those references
+      // after every job keeps a 250-image headless batch bounded while the
+      // deliberately shared GLB geometry/material cache remains resident.
+      renderer.renderLists.dispose();
+    }
   }
 }
 

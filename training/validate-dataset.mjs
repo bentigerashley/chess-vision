@@ -10,6 +10,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { Chess } from 'chess.js';
 import { PNG } from 'pngjs';
+import { ASSET_LABEL_PROVENANCE } from './assets/asset-contract.mjs';
 
 const TRAINING_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const DEFAULT_TRAINING_OUTPUT_ROOT = path.join(TRAINING_ROOT, 'output');
@@ -23,6 +24,7 @@ const V2_SET_PROVENANCE = Object.freeze({
   'brass-minimal': { board_family: 'brushed-brass-slate', silhouette: 'architectural-minimal' },
   'ornate-dark-wood': { board_family: 'mahogany-boxwood', silhouette: 'baroque-ornate' },
 });
+const V3_ASSET_PROVENANCE = ASSET_LABEL_PROVENANCE;
 
 /** The classifier contract: index 0 is intentionally the empty-square class. */
 export const CLASS_VOCABULARY = Object.freeze([
@@ -197,7 +199,7 @@ function validateCamera(label, errors) {
   const width = label.image?.width;
   const height = label.image?.height;
   const margin = requireFiniteNumber(camera.board_margin_px, 'label.camera.board_margin_px', errors);
-  if (label.style?.model_version === 'procedural-piece-families/v2') {
+  if (['procedural-piece-families/v2', 'gltf-asset-packs/v3'].includes(label.style?.model_version)) {
     requireString(camera.camera_rig, 'label.camera.camera_rig', errors);
   }
   requireFiniteNumber(camera.fov_degrees, 'label.camera.fov_degrees', errors);
@@ -299,17 +301,22 @@ export function validateLabel(label) {
     requireString(style.family, 'label.style.family', errors);
     const modelVersion = requireString(style.model_version, 'label.style.model_version', errors);
     requireInteger(style.seed, 'label.style.seed', errors, { min: 0 });
-    if (modelVersion === 'procedural-piece-families/v2') {
+    if (modelVersion === 'procedural-piece-families/v2' || modelVersion === 'gltf-asset-packs/v3') {
       const expected = V2_SET_PROVENANCE[style.family];
-      if (!expected) addError(errors, 'label.style.family', 'must be a known procedural-piece-families/v2 set');
+      if (!expected) addError(errors, 'label.style.family', `must be a known ${modelVersion} set`);
       const boardFamily = requireString(style.board_family, 'label.style.board_family', errors);
       const silhouette = requireString(style.silhouette, 'label.style.silhouette', errors);
       if (expected && boardFamily !== null && boardFamily !== expected.board_family) addError(errors, 'label.style.board_family', `must match ${style.family} (${expected.board_family})`);
       if (expected && silhouette !== null && silhouette !== expected.silhouette) addError(errors, 'label.style.silhouette', `must match ${style.family} (${expected.silhouette})`);
     }
+    if (modelVersion === 'gltf-asset-packs/v3') {
+      for (const [field, expected] of Object.entries(V3_ASSET_PROVENANCE)) {
+        if (style[field] !== expected) addError(errors, `label.style.${field}`, `must match the locked asset provenance (${String(expected)})`);
+      }
+    }
   }
   if (!isPlainObject(label.lighting)) addError(errors, 'label.lighting', 'is required');
-  else if (style?.model_version === 'procedural-piece-families/v2') requireString(label.lighting.id, 'label.lighting.id', errors);
+  else if (['procedural-piece-families/v2', 'gltf-asset-packs/v3'].includes(style?.model_version)) requireString(label.lighting.id, 'label.lighting.id', errors);
   if (!isPlainObject(label.renderer) || label.renderer.webgl2 !== true) addError(errors, 'label.renderer.webgl2', 'must record an accepted WebGL2 renderer');
   validateCamera(label, errors);
 
@@ -527,6 +534,8 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
   const artifacts = Array.isArray(renderManifest.artifacts) ? renderManifest.artifacts : [];
   if (renderManifest.artifact_count !== artifacts.length) addError(errors, 'render.artifact_count', 'must equal artifacts.length');
   if (renderManifest.expected_positions !== source.positions.length) addError(errors, 'render.expected_positions', 'must equal source positions.length');
+  const manifestModelVersion = renderManifest.renderer_model_version;
+  if (manifestModelVersion !== undefined && typeof manifestModelVersion !== 'string') addError(errors, 'render.renderer_model_version', 'must be a string when provided');
   const variants = requireInteger(renderManifest.variants_per_position, 'render.variants_per_position', errors, { min: 1 });
   if (variants !== null && artifacts.length !== source.positions.length * variants) addError(errors, 'render.artifacts', 'must contain every configured position/style variant exactly once');
   const fullRun = source.full_run;
@@ -536,7 +545,7 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
   const artifactIds = new Set();
   const artifactPaths = new Set();
   const sourceCounts = new Map();
-  const v2StylesBySource = new Map();
+  const rendererStylesBySource = new Map();
   const expectedFiles = new Set([path.resolve(outputReal, 'manifest.json')]);
   for (const [index, artifact] of artifacts.entries()) {
     const field = `render.artifacts[${index}]`;
@@ -565,6 +574,9 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
       else addError(errors, `${field}.label`, String(error));
       continue;
     }
+    if (typeof manifestModelVersion === 'string' && label.style.model_version !== manifestModelVersion) {
+      addError(errors, `${field}.label.style.model_version`, 'must match render.renderer_model_version');
+    }
     if (label.artifact.id !== artifact.id || label.artifact.rgb_path !== artifact.rgb_path || label.artifact.instance_mask_path !== artifact.instance_mask_path) addError(errors, field, 'must agree exactly with the label artifact paths and id');
     if (label.fen !== artifact.fen || label.style.family !== artifact.style) addError(errors, field, 'FEN and style must agree exactly with the label');
     if (rgb && mask) validateMaskTruth(mask, rgb, label, field, errors);
@@ -574,17 +586,17 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
       if (label.fen !== sourcePosition.rendered_fen || label.source.source_fen !== sourcePosition.source_fen || label.source.first_uci !== sourcePosition.first_uci) addError(errors, `${field}.label.source`, 'does not match the source position truth');
       if (label.source.source_version !== source.source_version) addError(errors, `${field}.label.source.source_version`, 'does not match the source manifest version');
       sourceCounts.set(label.source.puzzle_id, (sourceCounts.get(label.source.puzzle_id) ?? 0) + 1);
-      if (label.style.model_version === 'procedural-piece-families/v2') {
-        const styles = v2StylesBySource.get(label.source.puzzle_id) ?? new Set();
+      if (['procedural-piece-families/v2', 'gltf-asset-packs/v3'].includes(label.style.model_version)) {
+        const styles = rendererStylesBySource.get(label.source.puzzle_id) ?? new Set();
         if (styles.has(label.style.family)) addError(errors, field, `duplicates ${label.style.family} for source ${label.source.puzzle_id}`);
         styles.add(label.style.family);
-        v2StylesBySource.set(label.source.puzzle_id, styles);
+        rendererStylesBySource.set(label.source.puzzle_id, styles);
       }
     }
   }
   for (const sourceId of knownSources.keys()) if (sourceCounts.get(sourceId) !== variants) addError(errors, 'render.artifacts', `must contain exactly ${variants} artifacts for source ${sourceId}`);
-  if (fullRun) for (const [sourceId, styles] of v2StylesBySource.entries()) {
-    if (styles.size !== Object.keys(V2_SET_PROVENANCE).length) addError(errors, 'render.artifacts', `must contain every v2 set family exactly once for source ${sourceId}`);
+  if (fullRun) for (const [sourceId, styles] of rendererStylesBySource.entries()) {
+    if (styles.size !== Object.keys(V2_SET_PROVENANCE).length) addError(errors, 'render.artifacts', `must contain every renderer set family exactly once for source ${sourceId}`);
   }
   if (fullRun && (knownSources.size !== 50 || artifacts.length !== 250)) addError(errors, 'render', 'full configured run must contain 50 sources × 5 styles = 250 artifacts');
 

@@ -6,6 +6,7 @@ import { allSquareLabels, configureCamera, fenToSquares, physicalSquare, validat
 import { assertLabelMatchesFen, boxesFromMask, idToRgb, rgbToId } from '../scene/labels.mjs';
 import { createJobs } from '../renderer/run-render.mjs';
 import { CHESS_SET_SPECS } from '../scene/piece-factories.mjs';
+import { ASSET_PIECE_PROVENANCE, FEN_ASSET_NODE_NAMES } from '../scene/gltf-piece-factory.mjs';
 import { createRandom } from '../scene/random.mjs';
 
 const FEN = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/2N5/PPPP1PPP/R1BQKBNR b KQkq - 2 3';
@@ -61,6 +62,13 @@ test('every set family owns a distinct real-world board and piece specification'
   }
 });
 
+test('the renderer defaults to a twelve-class, provenance-locked mesh source', () => {
+  assert.equal(ASSET_PIECE_PROVENANCE.source_kind, 'gltf-asset');
+  assert.equal(ASSET_PIECE_PROVENANCE.fallback, false);
+  assert.equal(Object.keys(FEN_ASSET_NODE_NAMES).length, 12);
+  assert.equal(FEN_ASSET_NODE_NAMES.N, 'Knight_W1');
+});
+
 test('camera sampling spans multiple safe photographic rigs', () => {
   const cameras = Array.from({ length: 12 }, (_, seed) => configureCamera(createRandom(seed + 1), 1024, 1024));
   assert(cameras.every(({ camera, metadata }) => validateBoardInFrame(camera, 1024, 1024, metadata.board_margin_px)));
@@ -74,4 +82,15 @@ test('renderer jobs use the post-first-move source FEN and all five styles deter
   assert.equal(jobs.length, 5);
   assert.equal(new Set(jobs.map(({ style }) => style)).size, 5);
   assert(jobs.every(({ fen }) => fen === FEN));
+});
+
+test('renderer batches retain their absolute deterministic artifact ids', () => {
+  const nextFen = FEN.replace(' 2 3', ' 3 4');
+  const manifest = { schema_version: 'chess-vision.puzzle-source/v1', positions: [
+    { puzzle_id: 'first', source_fen: FEN, first_uci: 'a7a6', moves: ['a7a6'], themes: [], rendered_fen: FEN },
+    { puzzle_id: 'second', source_fen: nextFen, first_uci: 'a7a6', moves: ['a7a6'], themes: [], rendered_fen: nextFen },
+  ] };
+  const jobs = createJobs(manifest, { variants: 5, width: 1024, height: 1024, positionStart: 2, positionCount: 1 });
+  assert.equal(jobs.length, 5);
+  assert(jobs.every(({ artifactId }) => artifactId.startsWith('0002-')));
 });
