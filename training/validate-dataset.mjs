@@ -17,14 +17,17 @@ const DEFAULT_TRAINING_OUTPUT_ROOT = path.join(TRAINING_ROOT, 'output');
 const FILES = 'abcdefgh';
 const FEN_PIECES = new Set(['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']);
 // Kept as plain metadata so archival validation does not depend on Three.js or a DOM.
-const V2_SET_PROVENANCE = Object.freeze({
+const SET_FAMILY_PROVENANCE = Object.freeze({
   'wood-staunton': { board_family: 'walnut-maple', silhouette: 'club-staunton' },
   'marble-classical': { board_family: 'carrara-serpentine', silhouette: 'neoclassical-column' },
   'ebony-ivory-tournament': { board_family: 'ebony-ivory-inlay', silhouette: 'slender-tournament' },
   'brass-minimal': { board_family: 'brushed-brass-slate', silhouette: 'architectural-minimal' },
   'ornate-dark-wood': { board_family: 'mahogany-boxwood', silhouette: 'baroque-ornate' },
 });
-const V3_ASSET_PROVENANCE = ASSET_LABEL_PROVENANCE;
+const LOCKED_ASSET_PROVENANCE = ASSET_LABEL_PROVENANCE;
+const GLTF_ASSET_V4 = 'gltf-asset-packs/v4';
+const REALISTIC_RENDERER_MODEL_VERSIONS = new Set(['procedural-piece-families/v2', 'gltf-asset-packs/v3', GLTF_ASSET_V4]);
+const LOCKED_ASSET_MODEL_VERSIONS = new Set(['gltf-asset-packs/v3', GLTF_ASSET_V4]);
 
 /** The classifier contract: index 0 is intentionally the empty-square class. */
 export const CLASS_VOCABULARY = Object.freeze([
@@ -199,7 +202,7 @@ function validateCamera(label, errors) {
   const width = label.image?.width;
   const height = label.image?.height;
   const margin = requireFiniteNumber(camera.board_margin_px, 'label.camera.board_margin_px', errors);
-  if (['procedural-piece-families/v2', 'gltf-asset-packs/v3'].includes(label.style?.model_version)) {
+  if (REALISTIC_RENDERER_MODEL_VERSIONS.has(label.style?.model_version)) {
     requireString(camera.camera_rig, 'label.camera.camera_rig', errors);
   }
   requireFiniteNumber(camera.fov_degrees, 'label.camera.fov_degrees', errors);
@@ -224,6 +227,61 @@ function validateCamera(label, errors) {
       }
     }
   });
+
+  if (label.style?.model_version === GLTF_ASSET_V4) {
+    if (!Array.isArray(camera.projected_piece_bounds)) {
+      addError(errors, 'label.camera.projected_piece_bounds', 'must record projected bounds for every labelled piece');
+      return;
+    }
+    camera.projected_piece_bounds.forEach((bounds, index) => {
+      const field = `label.camera.projected_piece_bounds[${index}]`;
+      if (!isPlainObject(bounds)) {
+        addError(errors, field, 'must be an object');
+        return;
+      }
+      requireInteger(bounds.instance_id, `${field}.instance_id`, errors, { min: 1 });
+      const minX = requireFiniteNumber(bounds.min_x, `${field}.min_x`, errors);
+      const minY = requireFiniteNumber(bounds.min_y, `${field}.min_y`, errors);
+      const maxX = requireFiniteNumber(bounds.max_x, `${field}.max_x`, errors);
+      const maxY = requireFiniteNumber(bounds.max_y, `${field}.max_y`, errors);
+      if (minX !== null && minY !== null && maxX !== null && maxY !== null && margin !== null && typeof width === 'number' && typeof height === 'number') {
+        if (minX > maxX || minY > maxY) addError(errors, field, 'must have ordered min/max coordinates');
+        if (minX < margin || maxX > width - margin || minY < margin || maxY > height - margin) addError(errors, field, 'falls outside the accepted complete-piece camera frame');
+      }
+    });
+  }
+}
+
+function projectedBoundsByInstance(label, pieces, image, errors) {
+  if (label.style?.model_version !== GLTF_ASSET_V4) return new Map();
+  const bounds = label.camera?.projected_piece_bounds;
+  if (!Array.isArray(bounds)) return new Map();
+  if (bounds.length !== pieces.length) addError(errors, 'label.camera.projected_piece_bounds', 'must have one record per labelled piece');
+  const byInstance = new Map();
+  for (const [index, record] of bounds.entries()) {
+    const field = `label.camera.projected_piece_bounds[${index}]`;
+    if (!isPlainObject(record) || !Number.isInteger(record.instance_id)) continue;
+    if (byInstance.has(record.instance_id)) addError(errors, `${field}.instance_id`, 'must be unique');
+    byInstance.set(record.instance_id, record);
+  }
+  for (const [index, piece] of pieces.entries()) {
+    if (!isPlainObject(piece) || !Number.isInteger(piece.instance_id)) continue;
+    const field = `label.pieces[${index}]`;
+    const projected = byInstance.get(piece.instance_id);
+    if (!projected) {
+      addError(errors, `${field}.instance_id`, 'must have matching projected complete-piece bounds');
+      continue;
+    }
+    const box = piece.bounding_box;
+    if (!isPlainObject(box) || !image || ![projected.min_x, projected.min_y, projected.max_x, projected.max_y].every(Number.isFinite)) continue;
+    // Rasterisation can occupy a neighbouring whole pixel relative to the
+    // continuous projected AABB, so permit one pixel of rounding tolerance.
+    if (box.x < Math.floor(projected.min_x) - 1 || box.y < Math.floor(projected.min_y) - 1
+      || box.x + box.width > Math.ceil(projected.max_x) + 1 || box.y + box.height > Math.ceil(projected.max_y) + 1) {
+      addError(errors, `${field}.bounding_box`, 'must lie within its recorded projected complete-piece bounds');
+    }
+  }
+  return byInstance;
 }
 
 function validateBoundingBox(box, field, image, errors) {
@@ -301,28 +359,29 @@ export function validateLabel(label) {
     requireString(style.family, 'label.style.family', errors);
     const modelVersion = requireString(style.model_version, 'label.style.model_version', errors);
     requireInteger(style.seed, 'label.style.seed', errors, { min: 0 });
-    if (modelVersion === 'procedural-piece-families/v2' || modelVersion === 'gltf-asset-packs/v3') {
-      const expected = V2_SET_PROVENANCE[style.family];
+    if (REALISTIC_RENDERER_MODEL_VERSIONS.has(modelVersion)) {
+      const expected = SET_FAMILY_PROVENANCE[style.family];
       if (!expected) addError(errors, 'label.style.family', `must be a known ${modelVersion} set`);
       const boardFamily = requireString(style.board_family, 'label.style.board_family', errors);
       const silhouette = requireString(style.silhouette, 'label.style.silhouette', errors);
       if (expected && boardFamily !== null && boardFamily !== expected.board_family) addError(errors, 'label.style.board_family', `must match ${style.family} (${expected.board_family})`);
       if (expected && silhouette !== null && silhouette !== expected.silhouette) addError(errors, 'label.style.silhouette', `must match ${style.family} (${expected.silhouette})`);
     }
-    if (modelVersion === 'gltf-asset-packs/v3') {
-      for (const [field, expected] of Object.entries(V3_ASSET_PROVENANCE)) {
+    if (LOCKED_ASSET_MODEL_VERSIONS.has(modelVersion)) {
+      for (const [field, expected] of Object.entries(LOCKED_ASSET_PROVENANCE)) {
         if (style[field] !== expected) addError(errors, `label.style.${field}`, `must match the locked asset provenance (${String(expected)})`);
       }
     }
   }
   if (!isPlainObject(label.lighting)) addError(errors, 'label.lighting', 'is required');
-  else if (['procedural-piece-families/v2', 'gltf-asset-packs/v3'].includes(style?.model_version)) requireString(label.lighting.id, 'label.lighting.id', errors);
+  else if (REALISTIC_RENDERER_MODEL_VERSIONS.has(style?.model_version)) requireString(label.lighting.id, 'label.lighting.id', errors);
   if (!isPlainObject(label.renderer) || label.renderer.webgl2 !== true) addError(errors, 'label.renderer.webgl2', 'must record an accepted WebGL2 renderer');
   validateCamera(label, errors);
 
   const pieces = label.pieces;
   if (!Array.isArray(pieces)) addError(errors, 'label.pieces', 'is required');
   else {
+    projectedBoundsByInstance(label, pieces, image, errors);
     const seenIds = new Set();
     const bySquare = new Map();
     for (const [index, piece] of pieces.entries()) {
@@ -586,7 +645,7 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
       if (label.fen !== sourcePosition.rendered_fen || label.source.source_fen !== sourcePosition.source_fen || label.source.first_uci !== sourcePosition.first_uci) addError(errors, `${field}.label.source`, 'does not match the source position truth');
       if (label.source.source_version !== source.source_version) addError(errors, `${field}.label.source.source_version`, 'does not match the source manifest version');
       sourceCounts.set(label.source.puzzle_id, (sourceCounts.get(label.source.puzzle_id) ?? 0) + 1);
-      if (['procedural-piece-families/v2', 'gltf-asset-packs/v3'].includes(label.style.model_version)) {
+      if (REALISTIC_RENDERER_MODEL_VERSIONS.has(label.style.model_version)) {
         const styles = rendererStylesBySource.get(label.source.puzzle_id) ?? new Set();
         if (styles.has(label.style.family)) addError(errors, field, `duplicates ${label.style.family} for source ${label.source.puzzle_id}`);
         styles.add(label.style.family);
@@ -596,7 +655,7 @@ export async function validateDatasetDirectory({ sourceManifestPath, renderManif
   }
   for (const sourceId of knownSources.keys()) if (sourceCounts.get(sourceId) !== variants) addError(errors, 'render.artifacts', `must contain exactly ${variants} artifacts for source ${sourceId}`);
   if (fullRun) for (const [sourceId, styles] of rendererStylesBySource.entries()) {
-    if (styles.size !== Object.keys(V2_SET_PROVENANCE).length) addError(errors, 'render.artifacts', `must contain every renderer set family exactly once for source ${sourceId}`);
+    if (styles.size !== Object.keys(SET_FAMILY_PROVENANCE).length) addError(errors, 'render.artifacts', `must contain every renderer set family exactly once for source ${sourceId}`);
   }
   if (fullRun && (knownSources.size !== 50 || artifacts.length !== 250)) addError(errors, 'render', 'full configured run must contain 50 sources × 5 styles = 250 artifacts');
 

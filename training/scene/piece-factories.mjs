@@ -12,7 +12,7 @@ export const CHESS_SET_SPECS = Object.freeze({
     board: { id: 'walnut-maple', light_square: '#e6c999', dark_square: '#795435', frame: '#3d2010', inlay: '#c29557', table: '#725337', table_surface: 'walnut', inlay_surface: 'walnut', inlay_metalness: 0.12, lighting: ['north-window', 'warm-study', 'neutral-studio'] },
     materials: {
       white: { surface: 'boxwood', color: '#d8a45e', roughness: 0.31, clearcoat: 0.34 },
-      black: { surface: 'walnut', color: '#26130c', roughness: 0.23, clearcoat: 0.42 },
+      black: { surface: 'walnut', color: '#7b5138', roughness: 0.34, clearcoat: 0.24 },
       accent: { surface: 'brass', color: '#9a6424', roughness: 0.25, metalness: 0.62, clearcoat: 0.2 },
     },
   },
@@ -23,7 +23,7 @@ export const CHESS_SET_SPECS = Object.freeze({
     board: { id: 'carrara-serpentine', light_square: '#e4e0d6', dark_square: '#52736f', frame: '#6b716e', inlay: '#d1c7af', table: '#454c4c', table_surface: 'stone', inlay_surface: 'stone', inlay_metalness: 0.12, lighting: ['north-window'] },
     materials: {
       white: { surface: 'carrara', color: '#e9e4d8', roughness: 0.19, clearcoat: 0.16 },
-      black: { surface: 'serpentine', color: '#283737', roughness: 0.22, clearcoat: 0.18 },
+      black: { surface: 'serpentine', color: '#3e6561', roughness: 0.3, clearcoat: 0.14 },
       accent: { surface: 'aged-brass', color: '#b6a88a', roughness: 0.34, metalness: 0.38, clearcoat: 0.12 },
     },
   },
@@ -34,7 +34,7 @@ export const CHESS_SET_SPECS = Object.freeze({
     board: { id: 'ebony-ivory-inlay', light_square: '#eadcc4', dark_square: '#49362b', frame: '#1f1511', inlay: '#b98d4e', table: '#2b2927', table_surface: 'ebony', inlay_surface: 'ebony', inlay_metalness: 0.12, lighting: ['north-window', 'warm-study', 'neutral-studio'] },
     materials: {
       white: { surface: 'ivory', color: '#eee2ca', roughness: 0.28, clearcoat: 0.19 },
-      black: { surface: 'ebony', color: '#090807', roughness: 0.16, clearcoat: 0.5 },
+      black: { surface: 'ebony', color: '#625b52', roughness: 0.28, clearcoat: 0.28 },
       accent: { surface: 'gold', color: '#bf9145', roughness: 0.22, metalness: 0.72, clearcoat: 0.22 },
     },
   },
@@ -44,8 +44,11 @@ export const CHESS_SET_SPECS = Object.freeze({
     profile: { pawn_scale: 0.91, major_scale: 0.91, king_scale: 0.99, detail: 0.52, base: 0.86, knight_turn: 0.17, crown_points: 5 },
     board: { id: 'brushed-brass-slate', light_square: '#c8c0b1', dark_square: '#4f6267', frame: '#89724e', inlay: '#d5b763', table: '#313b3e', table_surface: 'slate', inlay_surface: 'brass', inlay_metalness: 0.68, lighting: ['north-window', 'warm-study', 'neutral-studio'] },
     materials: {
-      white: { surface: 'brushed-brass', color: '#c79646', roughness: 0.29, metalness: 0.94, clearcoat: 0.18 },
-      black: { surface: 'blackened-brass', color: '#263033', roughness: 0.32, metalness: 0.84, clearcoat: 0.14 },
+      white: { surface: 'brushed-brass', color: '#d6b267', roughness: 0.29, metalness: 0.94, clearcoat: 0.18 },
+      // The dark side is patinated brass rather than a mirror-black coating.
+      // Its low metalness keeps a diffuse room-light component, as on a satin
+      // blackened alloy, so a phone camera can recover the silhouette.
+      black: { surface: 'blackened-brass', color: '#627880', roughness: 0.5, metalness: 0.22, clearcoat: 0.12, specular_intensity: 1.75 },
       accent: { surface: 'brushed-brass', color: '#edcd79', roughness: 0.2, metalness: 0.96, clearcoat: 0.22 },
     },
   },
@@ -56,7 +59,7 @@ export const CHESS_SET_SPECS = Object.freeze({
     board: { id: 'mahogany-boxwood', light_square: '#d8aa67', dark_square: '#6e3421', frame: '#35130c', inlay: '#bd8235', table: '#5a2c1d', table_surface: 'mahogany', inlay_surface: 'mahogany', inlay_metalness: 0.12, lighting: ['warm-study'] },
     materials: {
       white: { surface: 'boxwood', color: '#c98243', roughness: 0.28, clearcoat: 0.42 },
-      black: { surface: 'mahogany', color: '#1c0a07', roughness: 0.2, clearcoat: 0.48 },
+      black: { surface: 'mahogany', color: '#7c442f', roughness: 0.32, clearcoat: 0.3 },
       accent: { surface: 'aged-gold', color: '#b98535', roughness: 0.24, metalness: 0.76, clearcoat: 0.2 },
     },
   },
@@ -121,6 +124,7 @@ function pbrMaterial(materialSpec, seed) {
     metalness: materialSpec.metalness ?? 0,
     clearcoat: materialSpec.clearcoat ?? 0,
     clearcoatRoughness: Math.min((materialSpec.roughness ?? 0.35) + 0.1, 1),
+    specularIntensity: materialSpec.specular_intensity ?? 1,
     map: maps.map,
     bumpMap: maps.bumpMap,
     bumpScale: materialSpec.metalness ? 0.025 : 0.045,

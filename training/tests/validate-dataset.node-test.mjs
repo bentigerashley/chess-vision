@@ -61,6 +61,33 @@ function makeLabel({ id = '0001-wooden-staunton', fen = FEN, sourceId = 'puzzle-
   };
 }
 
+function makeGltfV4Label() {
+  const label = makeLabel();
+  label.style = {
+    family: 'wood-staunton', model_version: 'gltf-asset-packs/v4', seed: 11,
+    board_family: 'walnut-maple', silhouette: 'club-staunton',
+    source_kind: 'gltf-asset', asset_id: 'a-beautiful-game-v1',
+    asset_sha256: 'bd7133b4b322aae97c589b8839dae8155ad2546acb35ae32a127e722a959d007',
+    asset_license: 'CC-BY-4.0', asset_revision: 'glTF-Sample-Assets/main; checksum-pinned',
+    asset_attribution: '© 2020 ASWF, MaterialX Project (original model); © 2022 Ed Mackey (glTF conversion)',
+    fallback: false,
+  };
+  label.camera = {
+    ...label.camera,
+    board_margin_px: 0,
+    camera_rig: 'player-oblique',
+    projected_piece_bounds: label.pieces.map((piece) => ({
+      instance_id: piece.instance_id,
+      min_x: piece.bounding_box.x,
+      min_y: piece.bounding_box.y,
+      max_x: piece.bounding_box.x + piece.bounding_box.width,
+      max_y: piece.bounding_box.y + piece.bounding_box.height,
+    })),
+  };
+  label.lighting = { id: 'neutral-studio', key_intensity: 2.4 };
+  return label;
+}
+
 function pngBuffer(width, height, draw) {
   const png = new PNG({ width, height });
   png.data.fill(0);
@@ -150,6 +177,14 @@ test('binds v3 labels to the approved mesh asset rather than a silent fallback',
 
   label.style.fallback = true;
   assert.throws(() => validateLabel(label), (error) => error instanceof DatasetValidationError && error.message.includes('label.style.fallback'));
+});
+
+test('v4 labels bind every visible mask box to safe projected complete-piece bounds', () => {
+  const label = makeGltfV4Label();
+  assert.doesNotThrow(() => validateLabel(label));
+
+  label.camera.projected_piece_bounds[0].min_x = -1;
+  assert.throws(() => validateLabel(label), (error) => error instanceof DatasetValidationError && error.message.includes('complete-piece camera frame'));
 });
 
 test('a manifest that identifies its renderer version rejects mixed model labels', async () => {

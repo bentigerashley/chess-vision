@@ -11,6 +11,7 @@ npm run test
 npm run test:renderer
 npm run test:validate
 npm run test:assets
+npm run test:quality
 npm run fetch-assets
 npm run select-puzzles
 npm run render
@@ -24,15 +25,15 @@ Lichess rows describe the board before the opponent's first UCI move in `Moves`.
 
 ## Headless renderer
 
-`npm run render` reads the ignored `output/puzzle-sources.json` manifest and creates five deterministic variants per selected position in `output/dataset-v5/`. It launches an installed local Chrome or Edge through `puppeteer-core` and a loopback-only static server; set `CHESS_VISION_BROWSER` if the browser is installed outside the usual Windows locations.
+`npm run render` reads the ignored `output/puzzle-sources.json` manifest and creates five deterministic variants per selected position in `output/dataset-v6/`. It launches an installed local Chrome or Edge through `puppeteer-core` and a loopback-only static server; set `CHESS_VISION_BROWSER` if the browser is installed outside the usual Windows locations.
 
 The renderer is deliberately isolated from the PWA dependency graph. Its pieces are a pre-authored, CC-BY glTF chess set fetched into the ignored `assets/cache/` directory by `npm run fetch-assets`. The command verifies a pinned SHA-256 before and after download; `npm run render` verifies it again before Chrome starts. See [`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md) for the required attribution. The older procedural factory remains in source history for comparison, but no renderer path selects it.
 
 The five variants (`wood-staunton`, `marble-classical`, `ebony-ivory-tournament`, `brass-minimal`, and `ornate-dark-wood`) now vary real-world board construction, tabletop, piece PBR finish, camera, and indoor lighting around that coherent professional geometry. They do not claim to be scans of five separate retail sets.
 
-The `gltf-asset-packs/v3` renderer samples four safe full-board camera rigs and three bounded indoor-lighting rigs. Its labels record the exact board family, source asset identifier/checksum/licence/revision, a `fallback: false` assertion, camera rig, and lighting identity. The validator rejects labels that omit or alter this provenance.
+The `gltf-asset-packs/v4` renderer applies an FIDE-calibrated profile to the locked mesh asset: piece heights map to the published 50â€“95 mm Staunton range against a 57.5 mm reference square, and every lower base is measured and adjusted into the prescribed 40â€“50% height band without stretching the upper silhouette. It samples four safe full-board camera rigs and three bounded indoor-lighting rigs. Its labels record the exact board family, source asset identifier/checksum/licence/revision, a `fallback: false` assertion, camera rig, lighting identity, and projected complete-piece bounds. The validator rejects labels that omit or alter this provenance.
 
-Each artifact has an RGB image, an instance-ID PNG mask, and a JSON label sidecar. The label starts with its complete FEN and records all 64 physical board squares, the fixed 13-class vocabulary, exact per-piece mask-derived visible-pixel bounding boxes, source provenance, deterministic scene seed, WebGL/browser identity, lighting, camera, and the accepted full-board projection. A frame is rejected before output whenever any physical outer board-frame corner falls outside its safe image margin.
+Each artifact has an RGB image, an instance-ID PNG mask, and a JSON label sidecar. The label starts with its complete FEN and records all 64 physical board squares, the fixed 13-class vocabulary, exact per-piece mask-derived visible-pixel bounding boxes, source provenance, deterministic scene seed, WebGL/browser identity, lighting, camera, and the accepted full-board projection. A frame is rejected before output whenever the physical outer board frame or any complete piece falls outside its safe image margin.
 
 For a faster, lower-resolution verification of all selected positions:
 
@@ -43,7 +44,8 @@ npm run render -- --output output/smoke --variants 1 --width 320 --height 320
 The generated image, mask, and label directories remain ignored because they are reproducible training artifacts, not app assets. Validate a full 50-position × 5-style run before model training:
 
 ```powershell
-node validate-dataset.mjs --source output/puzzle-sources.json --render output/dataset-v5/manifest.json --output output/dataset-v5 --full
+node validate-dataset.mjs --source output/puzzle-sources.json --render output/dataset-v6/manifest.json --output output/dataset-v6 --full
+node renderer/render-quality.mjs --render output/dataset-v6/manifest.json --output output/dataset-v6
 ```
 
 For a long high-resolution run, the renderer is resumable without changing any
@@ -51,5 +53,5 @@ truth or artifact identifiers. Run five ten-position batches into the same
 output directory **sequentially**, then run the full validator after the final batch:
 
 ```powershell
-1..5 | ForEach-Object { npm run render -- --output output/dataset-v5 --position-start ($PSItem * 10 - 9) --position-count 10 }
+1..5 | ForEach-Object { npm run render -- --output output/dataset-v6 --position-start ($PSItem * 10 - 9) --position-count 10 }
 ```
