@@ -5,7 +5,7 @@
   "description": "Private, offline data-source tooling for Chess Vision.",
   "type": "module",
   "scripts": {
-    "test": "py -3 -m unittest discover -s tests -p \"test_*.py\"",
+    "test": "set \"PYTHONPATH=..\" && py -3.9 -m unittest discover -s tests -p \"test_*.py\"",
     "select-puzzles": "py -3 source/fetch_lichess_puzzles.py --config config/dataset.v1.json --output output/puzzle-sources.json",
     "test:renderer": "node --test tests/renderer-contract.node-test.mjs",
     "test:validate": "node --test tests/validate-dataset.node-test.mjs",

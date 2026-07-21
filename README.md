@@ -68,7 +68,7 @@ Store submission itself is intentionally not part of this repository: it needs p
 
 ## Recognition model and synthetic data
 
-Synthetic rendering, dataset generation, and model training are private developer workflows under [`training/`](training/README.md). They are not imported by the mobile app and their generated outputs remain ignored. Promote a model only after a held-out real-photo evaluation and a separate mobile preprocessing/runtime decision; then replace the intentional fallback in [`src/services/recognition.ts`](src/services/recognition.ts).
+Synthetic rendering, dataset generation, and model training are private developer workflows under [`training/`](training/README.md). They are not imported by the mobile app and their generated outputs remain ignored. The real-photo evaluator reports piece-only and occupied-square performance separately from the `empty` class, complete-board accuracy, correction burden, and an explicit promotion verdict. Promote a model only after its full held-out real-photo report passes and a separate mobile preprocessing/runtime decision is made; then replace the intentional fallback in [`src/services/recognition.ts`](src/services/recognition.ts).
 
 ## Engine licensing
 

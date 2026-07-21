@@ -66,6 +66,8 @@ export class EngineSearchOutput {
   }
 
   private lines() {
-    return [...this.principalVariations.values()].sort((left, right) => left.rank - right.rank).slice(0, 3)
+    return [...this.principalVariations.values()]
+      .filter(line => line.rank <= 3)
+      .sort((left, right) => left.rank - right.rank)
   }
 }

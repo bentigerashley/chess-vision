@@ -1,0 +1,13 @@
+{
+  "schema_version": "chess-vision.real-photo-source/v1",
+  "name": "Chess Recognition Dataset (ChessReD), ChessReD2K subset",
+  "dataset_url": "https://data.4tu.nl/datasets/99b5c721-280b-450b-b058-b2900b69a90f",
+  "annotations_url": "https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/3cae6364-daca-4967-b426-1e4b68cdb64c",
+  "archive_url": "https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/410e41c7-dde5-413f-8722-3e112363a1a2",
+  "annotations_md5": "d34bca5ad46ec7a8df96a1d3c36784f3",
+  "archive_md5": "4e55e299b6b2973e0d8659bd241c7975",
+  "license": "CC BY-NC-SA 4.0",
+  "allowed_use": "private_evaluation_only",
+  "citation": "Masouris, Athanasios (2023): Chess Recognition Dataset (ChessReD). Version 2. 4TU.ResearchData. https://doi.org/10.4121/99b5c721-280b-450b-b058-b2900b69a90f.v2",
+  "notes": "Do not use these images to train, package, redistribute, or ship a commercial model without separate permission."
+}

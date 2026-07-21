@@ -8,7 +8,7 @@ describe('Stockfish UCI parsing', () => {
     expect(parseEngineInfo('info depth 14 multipv 1 score mate 3 pv h7h8q')).toMatchObject({ evaluation: '+M3' })
   })
 
-  it('buffers fragmented callback chunks and keeps only three ordered principal variations', () => {
+  it('buffers fragmented callback chunks and keeps only the first three requested principal variations', () => {
     const output = new EngineSearchOutput()
     expect(output.consume('info depth 12 multipv 2 score cp 18 pv d2d4\ninfo depth 12 mul')).toEqual({
       complete: false,
@@ -17,7 +17,7 @@ describe('Stockfish UCI parsing', () => {
     })
     const result = output.consume('tipv 1 score cp 21 pv e2e4\ninfo depth 12 multipv 4 score cp 0 pv g1f3\nbestmove e2e4\n')
     expect(result.complete).toBe(true)
-    expect(result.lines.map(line => line.rank)).toEqual([1, 2, 4])
+    expect(result.lines.map(line => line.rank)).toEqual([1, 2])
     expect(result.protocolLines).toContain('bestmove e2e4')
   })
 

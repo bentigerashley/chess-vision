@@ -19,12 +19,12 @@ npm run render
 
 ## GPU square-classifier baseline
 
-The model-training path is intentionally separate from the renderer and PWA dependencies. It requires the CUDA-only, pinned stack in `training/requirements-ml.txt`; do not substitute a CPU wheel because the trainer rejects CPU fallback.
+The model-training path is intentionally separate from the renderer and native-app dependencies. It requires the CUDA-only, pinned stack in `training/requirements-ml.txt`; do not substitute a CPU wheel because the trainer rejects CPU fallback.
 
 ```powershell
-py -m pip install -r training/requirements-ml.txt
-python -m training.ml.train --dataset training/output/dataset-v6-final --output training/output/models/chess-piece-v1
-python -m training.ml.verify_export --experiment training/output/models/chess-piece-v1
+py -3.9 -m pip install -r training/requirements-ml.txt
+py -3.9 -m training.ml.train --dataset training/output/dataset-v6-final --output training/output/models/chess-piece-v1
+py -3.9 -m training.ml.verify_export --experiment training/output/models/chess-piece-v1
 ```
 
 The trainer first runs the full renderer validator, then source-splits the Lichess puzzle identities before making 64 square crops per board. It exports an ignored ONNX experiment with a machine-readable class/preprocessing contract and a CPU ONNX Runtime parity report. Synthetic metrics remain pipeline evidence only: collect and evaluate a held-out real-photo dataset, then make a separate browser-runtime and output-adapter decision before any model is copied into the PWA.
@@ -67,3 +67,45 @@ output directory **sequentially**, then run the full validator after the final b
 ```powershell
 1..5 | ForEach-Object { npm run render -- --output output/dataset-v6 --position-start ($PSItem * 10 - 9) --position-count 10 }
 ```
+
+## Real-photo readiness gate
+
+Synthetic validation is not a release metric. The private evaluator uses the
+official ChessReD2K test games because their physical-board photos are matched
+to PGN-derived piece truth and have four named board corners. It measures the
+same user-calibrated `a8..h1` path the native app will use.
+
+ChessReD2K is **CC BY-NC-SA 4.0**. It may be downloaded only for private
+evaluation after the licence has been reviewed. Do not use it for commercial
+training, bundle its photos or annotations, or put extracted material outside
+ignored `training/output/`.
+
+```powershell
+# Download the official annotations and ChessReD2K archive into ignored storage,
+# then extract the archive so <images-root>/images/... exists.
+Invoke-WebRequest https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/3cae6364-daca-4967-b426-1e4b68cdb64c -OutFile training/output/chessred-source/annotations.json
+Invoke-WebRequest https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/410e41c7-dde5-413f-8722-3e112363a1a2 -OutFile training/output/chessred-source/chessred2k.zip
+Expand-Archive training/output/chessred-source/chessred2k.zip training/output/chessred-source/chessred2k
+
+py -3.9 -m training.ml.chessred `
+  --annotations training/output/chessred-source/annotations.json `
+  --images-root training/output/chessred-source/chessred2k `
+  --source training/real/chessred2k.source.json `
+  --output training/output/real-photo-eval/chessred2k-test-records.json `
+  --accept-noncommercial
+
+py -3.9 -m training.ml.real_eval `
+  --records training/output/real-photo-eval/chessred2k-test-records.json `
+  --checkpoint training/output/models/chess-piece-v1/best.pt `
+  --contract training/output/models/chess-piece-v1/model-contract.json `
+  --output training/output/real-photo-eval/chessred2k-report.json
+```
+
+The evaluator rejects CPU execution, test-split leakage, incomplete source
+metadata, bad annotation hashes, missing board corners, and partial
+benchmarks. Its verdict is `ready-for-native-runtime-decision` only when the
+full held-out set meets every threshold: 13-class macro F1 >= 0.95, piece-only
+macro F1 >= 0.95, occupied-square recall >= 0.97, exact placement >= 0.75,
+95th-percentile correction burden <= 2 squares, and zero structurally invalid
+predictions. `empty` is a proper class, but cannot make a model pass by
+dominating the pooled square count.
