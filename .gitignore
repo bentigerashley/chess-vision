@@ -4,3 +4,6 @@ dist/
 coverage/
 public/models/chess-piece/
 generated-datasets/
+training/output/
+training/assets/cache/
+__pycache__/

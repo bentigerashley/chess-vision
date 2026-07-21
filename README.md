@@ -17,7 +17,7 @@ The app ships truthfully without trained weights: it opens an editable position 
 
 ## Synthetic data
 
-Use **Dataset studio** in the app to download original Three.js renders and a `manifest.json`. Each sample records its image name, FEN, complete square map, random seed, and scene metadata. Synthetic data creates dependable labels, but validate trained models against real photographs before relying on recognition.
+Synthetic rendering is a private developer workflow under [`training/`](training/README.md), not part of the app. It sources legal Lichess puzzle positions, renders full-board Three.js scenes, and validates labels before any dataset is used for model training. Synthetic data must be evaluated against held-out real photographs before recognition is presented as available.
 
 ## Current boundaries
 

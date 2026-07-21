@@ -1,0 +1,5 @@
+PuzzleId,FEN,Moves,Themes
+start-e4,rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1,e2e4 e7e5,opening
+duplicate-id,rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1,d2d4 d7d5,opening
+illegal-uci,rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1,e2e5,invalid
+bad-fen,8/8/8/8/8/8/8/8 w - - 0 1,e2e4,invalid
